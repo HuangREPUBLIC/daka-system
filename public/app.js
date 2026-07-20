@@ -3,12 +3,19 @@
  * 前端：单页应用，所有数据来自服务端 API（多人多设备看到同一份数据）。
  * 权限在服务端强制校验，这里只负责隐藏没权限的按钮，改善使用体验。
  */
-const ROLE = { admin: "管理员", sales: "业务员", follower: "下厂员" };
+// 职位名称由服务端下发（管理员可自定义职位），这里只做展示
+const roleLabelOf = u => (u ? (u.roleLabel || (u.role === "admin" ? "管理员" : u.role)) : "");
+const labelForRoleKey = k => k === "admin" ? "管理员"
+  : ((state.roles.find(r => r.k === k) || {}).label || k);
 
 let state = {
   token: localStorage.getItem("daka_token") || null,
   me: null, users: [], fields: { order: [], production: [] },
-  factories: { emb: [], prod: [], proc: [] }, orders: []
+  factories: { emb: [], prod: [], proc: [] }, orders: [], roles: [],
+  // 聊天
+  chat: { contacts: [], activeId: null, contact: null, messages: [], draft: "" },
+  unread: { total: 0, byUser: {} },
+  myLogs: null
 };
 let route = { v: "orders", id: null };
 let editingBasic = false, imgDraft = {}, importPreview = null, importRaw = "";
@@ -48,7 +55,7 @@ async function api(method, path, body) {
 async function refresh() {
   const b = await api("GET", "/bootstrap");
   state.me = b.me; state.users = b.users; state.fields = b.fields;
-  state.factories = b.factories; state.orders = b.orders;
+  state.factories = b.factories; state.orders = b.orders; state.roles = b.roles || [];
 }
 // 统一的“执行 -> 刷新 -> 重绘”包装，出错弹提示
 async function run(fn, okMsg) {
@@ -59,22 +66,22 @@ async function run(fn, okMsg) {
 /* ================= 权限（前端仅用于显示控制） ================= */
 function canEditBasic(o) {
   const m = me(); if (!m) return false;
-  if (m.role === "admin") return true;
-  return m.role === "sales" && (o.createdBy === m.id || o.values.sales === m.id);
+  if (m.template === "admin") return true;
+  return m.template === "sales" && (o.createdBy === m.id || o.values.sales === m.id);
 }
 function canAddLog(o, section) {
   const m = me(); if (!m) return false;
-  if (m.role === "admin") return true;
+  if (m.template === "admin") return true;
   if (o.values.follower === m.id) return true;
   if (section === "order" && canEditBasic(o)) return true;
   return false;
 }
-const canTouchEntry = e => { const m = me(); return m && (m.role === "admin" || e.by === m.id); };
+const canTouchEntry = e => { const m = me(); return m && (m.template === "admin" || e.by === m.id); };
 
 /* ================= 字段与下拉 ================= */
 function optionsFor(f) {
-  if (f.type === "user-sales") return state.users.filter(u => u.role === "sales").map(u => [u.id, u.name]);
-  if (f.type === "user-follower") return state.users.filter(u => u.role === "follower").map(u => [u.id, u.name]);
+  if (f.type === "user-sales") return state.users.filter(u => u.template === "sales").map(u => [u.id, u.name]);
+  if (f.type === "user-follower") return state.users.filter(u => u.template === "follower").map(u => [u.id, u.name]);
   if (f.type === "factory-emb") return state.factories.emb.map(x => [x, x]);
   if (f.type === "factory-prod") return state.factories.prod.map(x => [x, x]);
   if (f.type === "select") return (f.options || []).map(x => [x, x]);
@@ -125,6 +132,7 @@ function renderModal() {
   mask.innerHTML = `<div class="modal" role="dialog" aria-modal="true">
     <div class="m-title">${esc(o.title)}</div>
     ${o.body ? `<div class="m-body">${esc(o.body)}</div>` : ""}
+    ${o.html ? `<div style="margin-top:12px">${o.html}</div>` : ""}
     ${o.input === "textarea" ? `<textarea class="in" id="m-input" style="margin-top:10px;min-height:110px"></textarea>`
       : o.input ? `<input class="in" id="m-input" style="margin-top:10px" ${o.password ? 'type="password"' : ""}>` : ""}
     <div class="row" style="margin-top:14px;justify-content:flex-end">
@@ -136,25 +144,33 @@ function renderModal() {
 }
 
 /* ================= 路由 / 渲染 ================= */
-function go(v, id) { route = { v, id: id || null }; editingBasic = false; render(); window.scrollTo(0, 0); }
+function go(v, id) {
+  route = { v, id: id || null }; editingBasic = false;
+  if (v !== "chat") { state.chat.activeId = null; state.chat.messages = []; state.chat.draft = ""; }
+  render(); window.scrollTo(0, 0);
+  if (v === "account") A.loadMyLogs(state.me.id);
+  if (v === "staffLogs" && id) A.loadMyLogs(id);
+  if (v === "chat") { A.loadContacts(); A.refreshUnread(); }
+}
 
 function render() {
   const app = $("app");
   if (!me()) { app.innerHTML = vLogin(); return; }
   const m = me();
   const navs = [["orders", "订单列表"]];
-  if (m.role !== "follower") navs.push(["new", "新建订单"]);
-  navs.push(["mine", "我的打卡"]);
-  if (m.role === "admin") navs.push(["admin", "管理后台"]);
+  if (m.template === "admin" || m.template === "sales") navs.push(["new", "新建订单"]);
+  navs.push(["chat", "聊天"]);
+  if (m.template === "admin") navs.push(["admin", "管理后台"]);
   navs.push(["account", "我的账号"]);
-  const views = { orders: vOrders, new: vNew, detail: vDetail, mine: vMine, admin: vAdmin, account: vAccount };
+  const views = { orders: vOrders, new: vNew, detail: vDetail, chat: vChat, admin: vAdmin, account: vAccount, staffLogs: vStaffLogs };
   app.innerHTML = `
   <header class="topbar"><div class="topbar-in">
     <span class="brand"><span class="dot"></span>跟单打卡系统</span>
     <nav class="nav">${navs.map(([v, t]) =>
-      `<button class="${route.v === v ? "on" : ""}" onclick="go('${v}')">${t}</button>`).join("")}
+      `<button class="${route.v === v ? "on" : ""}" onclick="go('${v}')">${t}${
+        v === "chat" && state.unread.total ? `<span class="badge">${state.unread.total > 99 ? "99+" : state.unread.total}</span>` : ""}</button>`).join("")}
       <button onclick="A.logout()">退出</button></nav>
-    <span class="who">${esc(m.name)} · ${ROLE[m.role]}</span>
+    <span class="who">${esc(m.name)} · ${esc(roleLabelOf(m))}</span>
   </div></header>
   <main class="wrap">${(views[route.v] || vOrders)()}</main>`;
 }
@@ -168,13 +184,7 @@ function vLogin() {
       <label class="f"><span>密码</span><input class="in" id="lg-pass" type="password" placeholder="请输入密码"
         onkeydown="if(event.key==='Enter')A.login()"></label>
       <button class="btn" style="width:100%;justify-content:center" onclick="A.login()">登 录</button>
-      <div style="text-align:center;margin-top:10px"><a href="javascript:void(0)" style="font-size:13px" onclick="A.togglePwBox()">忘记密码 / 修改密码</a></div>
-      <div id="pwbox" style="display:none;margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
-        <label class="f"><span>手机号</span><input class="in" id="fp-phone" inputmode="tel"></label>
-        <label class="f"><span>新密码</span><input class="in" id="fp-p1" type="password"></label>
-        <label class="f"><span>确认新密码</span><input class="in" id="fp-p2" type="password"></label>
-        <button class="btn ghost" onclick="A.resetPw()">确认修改密码</button>
-      </div>
+      <div style="text-align:center;margin-top:10px"><a href="javascript:void(0)" style="font-size:13px" onclick="A.openForgotPw()">忘记密码 / 修改密码</a></div>
       <div class="demo"><b>演示账号</b>（密码均为 123456）<br>
         管理员：13800000000　业务员：13811112222<br>下厂员：13855556666</div>
     </div></div>`;
@@ -189,7 +199,7 @@ function latestLog(o) {
   return best;
 }
 function vOrders() {
-  const seasons = [...new Set(state.orders.map(o => o.season))];
+  const seasons = seasonOptions("");
   const list = state.orders.filter(o =>
     (!filt.season || o.season === filt.season) &&
     (!filt.sales || o.values.sales === filt.sales) &&
@@ -347,24 +357,77 @@ function vDetail() {
     <button class="btn mini danger right" onclick="A.delOrder('${o.id}')">删除此订单</button></div></div>` : ""}`;
 }
 
-/* ---------- 我的打卡 ---------- */
-function vMine() {
-  const m = me(), rows = [];
-  for (const o of state.orders) {
-    const push = (label, e) => { if (e.by === m.id) rows.push({ o, label, e }); };
-    for (const f of [...state.fields.order, ...state.fields.production].filter(f => f.type === "log"))
-      for (const e of (o.logs[f.k] || [])) push(f.label, e);
-    for (const s of (o.subs || [])) for (const e of s.log) push("加工厂·" + (s.factory || s.name), e);
-    for (const e of o.followIssues) push("跟单问题", e);
-    for (const g of o.inspections) if (g.by === m.id)
-      rows.push({ o, label: "验货记录", e: { t: g.t, by: g.by, text: g.items.map(i => i.problem).join("；") } });
+/* ---------- 打卡记录（简洁列表，用于「我的账号」和管理员查看员工） ---------- */
+function logListHtml(rows) {
+  if (!rows) return `<div class="empty">加载中…</div>`;
+  if (!rows.length) return `<div class="empty">还没有打卡记录</div>`;
+  return `<div class="loglist">${rows.map(r => `<div class="logrow">
+    <div class="lr-top">
+      <a href="javascript:void(0)" onclick="go('detail','${r.orderId}')">${esc(r.styleNo || r.styleName || "订单")}</a>
+      <span class="tag">${esc(r.label)}</span>
+      <span class="num right">${fmtT(r.t)}</span>
+    </div>
+    <div class="lr-text">${esc(r.text)}</div></div>`).join("")}</div>`;
+}
+
+/* ---------- 聊天（一对一私聊） ---------- */
+function avatarHtml(name) {
+  return `<span class="avatar">${esc((name || "?").slice(0, 1))}</span>`;
+}
+function contactsHtml() {
+  const list = state.chat.contacts;
+  if (!list.length) return `<div class="empty">暂无同事</div>`;
+  return list.map(c => `<div class="contact" onclick="A.openChat('${c.id}')">
+    ${avatarHtml(c.name)}
+    <div class="c-main">
+      <div class="c-top"><b>${esc(c.name)}</b><span class="c-role">${esc(c.roleLabel || "")}</span>
+        ${c.last ? `<span class="num right c-time">${fmtT(c.last.t)}</span>` : ""}</div>
+      <div class="c-last">${c.last ? (c.last.fromMe ? "我：" : "") + esc(c.last.text) : "打个招呼吧"}</div>
+    </div>
+    ${c.unread ? `<span class="badge">${c.unread > 99 ? "99+" : c.unread}</span>` : ""}
+  </div>`).join("");
+}
+function messagesHtml() {
+  const ms = state.chat.messages;
+  if (!ms.length) return `<div class="empty" style="text-align:center;padding:24px 0">还没有聊天记录，发第一条消息吧</div>`;
+  let lastDay = "";
+  return ms.map(m => {
+    const d = new Date(m.t), day = `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+    let sep = "";
+    if (day !== lastDay) { lastDay = day; sep = `<div class="day-sep">${fmtT(m.t).replace(/ \d{2}:\d{2}$/, "")}</div>`; }
+    return sep + `<div class="bubble-row ${m.fromMe ? "mine" : ""}">
+      <div class="bubble">${esc(m.text)}<span class="b-time num">${fmtT(m.t).slice(-5)}</span></div></div>`;
+  }).join("");
+}
+function vChat() {
+  if (!state.chat.activeId) {
+    return `<div class="card"><h2><span class="bar"></span>聊天</h2>
+      <p class="sub">和同事一对一私聊，只有你们两个人能看到</p>
+      <div id="chat-contacts" class="contacts">${contactsHtml()}</div></div>`;
   }
-  rows.sort((a, b) => b.e.t - a.e.t);
-  return `<div class="card"><h2><span class="bar"></span>我的历史打卡 <span style="font-weight:400;font-size:13px;color:var(--ink-2)">共 ${rows.length} 条</span></h2>
-    ${rows.length ? `<ul class="log">${rows.map(r => `<li>
-      <div class="meta"><b>${esc(r.o.values.styleNo || "")} ${esc(r.o.values.styleName || "")}</b> · ${esc(r.label)} · <span class="num">${fmtT(r.e.t)}</span>
-        · <a href="javascript:void(0)" onclick="go('detail','${r.o.id}')">查看订单</a></div>
-      <div class="txt">${esc(r.e.text)}</div></li>`).join("")}</ul>` : `<div class="empty">还没有打卡记录</div>`}</div>`;
+  const c = state.chat.contact;
+  return `<div class="card chat-card">
+    <div class="chat-head">
+      <button class="back" style="margin:0" onclick="A.closeChat()">← 返回</button>
+      ${avatarHtml(c && c.name)}<b>${esc(c ? c.name : "")}</b>
+      <span class="c-role">${esc(c ? c.roleLabel : "")}</span>
+    </div>
+    <div class="chat-msgs" id="chat-msgs">${messagesHtml()}</div>
+    <div class="chat-input">
+      <textarea class="in" id="chat-text" rows="1" placeholder="输入消息…"
+        oninput="A.onDraft(this.value)"
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();A.sendMsg();}">${esc(state.chat.draft)}</textarea>
+      <button class="btn" onclick="A.sendMsg()">发送</button>
+    </div></div>`;
+}
+
+/* ---------- 管理员查看某员工的打卡记录 ---------- */
+function vStaffLogs() {
+  const u = userById(route.id);
+  return `<button class="back" onclick="go('admin')">← 返回管理后台</button>
+    <div class="card"><h2><span class="bar"></span>${esc(u ? u.name : "")} 的打卡记录
+      <span style="font-weight:400;font-size:13px;color:var(--ink-2)">${state.myLogs ? `共 ${state.myLogs.length} 条` : ""}</span></h2>
+      ${logListHtml(state.myLogs)}</div>`;
 }
 
 /* ---------- 管理后台 ---------- */
@@ -373,22 +436,35 @@ function vAdmin() {
   const roleCell = u => u.role === "admin"
     ? `<span class="tag role">管理员</span>`
     : `<select class="in" style="width:auto;padding:3px 8px;font-size:13px" onchange="A.changeRole('${u.id}',this.value)">
-        <option value="sales" ${u.role === "sales" ? "selected" : ""}>业务员</option>
-        <option value="follower" ${u.role === "follower" ? "selected" : ""}>下厂员</option></select>`;
+        ${state.roles.map(r => `<option value="${esc(r.k)}" ${u.role === r.k ? "selected" : ""}>${esc(r.label)}</option>`).join("")}</select>`;
   return `<div class="card"><h2><span class="bar"></span>员工账号管理</h2>
     <p class="sub">员工账号统一由管理员创建。<b>职位可直接下拉修改</b>（自己的职位不可改）；员工离职可删除账号（需二次确认，其历史打卡记录仍保留）</p>
-    <div class="tbl-wrap"><table class="tbl"><tr><th>姓名</th><th>手机号</th><th>角色</th><th>操作</th></tr>
+    <div class="tbl-wrap"><table class="tbl"><tr><th>姓名</th><th>手机号</th><th>职位</th><th>操作</th></tr>
     ${state.users.map(u => `<tr><td>${esc(u.name)}${u.id === me().id ? `<span class="tag" style="margin-left:6px">我</span>` : ""}</td>
       <td class="num">${esc(u.phone)}</td><td>${roleCell(u)}</td>
-      <td>${u.role === "admin" ? "—" : `<button class="btn mini ghost" onclick="A.resetUserPw('${u.id}')">重置密码</button>
+      <td><button class="btn mini ghost" onclick="A.viewStaffLogs('${u.id}')">查看打卡</button>${
+        u.role === "admin" ? "" : ` <button class="btn mini ghost" onclick="A.resetUserPw('${u.id}')">重置密码</button>
         <button class="btn mini danger" onclick="A.deleteUser('${u.id}')">删除</button>`}</td></tr>`).join("")}</table></div>
     <hr class="hr"><p class="sub"><b>新增员工</b></p>
     <div class="grid2">
       <label class="f"><span>姓名</span><input class="in" id="nu-name"></label>
       <label class="f"><span>手机号</span><input class="in" id="nu-phone" inputmode="tel"></label>
-      <label class="f"><span>角色</span><select class="in" id="nu-role"><option value="sales">业务员</option><option value="follower">下厂员</option></select></label>
+      <label class="f"><span>职位</span><select class="in" id="nu-role">${state.roles.map(r => `<option value="${esc(r.k)}">${esc(r.label)}</option>`).join("")}</select></label>
       <label class="f"><span>初始密码</span><input class="in" id="nu-pass" value="123456"></label></div>
     <button class="btn" onclick="A.addUser()">创建账号</button></div>
+
+  <div class="card"><h2><span class="bar"></span>职位管理</h2>
+    <p class="sub">除内置的业务员、下厂员外，可以自己加职位（例如「跟单主管」「质检员」）。新职位要选一套权限：
+      <b>业务员权限</b>=可建单、可改自己录入的订单；<b>下厂员权限</b>=只能给自己负责的订单打卡。</p>
+    <div class="row" style="gap:6px">${state.roles.map(r => `<span class="tag role">${esc(r.label)}
+      <span style="opacity:.7">(${r.template === "sales" ? "业务员权限" : "下厂员权限"})</span>${
+        r.core ? "" : ` <a href="javascript:void(0)" title="删除职位" onclick="A.delRole('${r.k}')" style="text-decoration:none">✕</a>`}</span>`).join("")}</div>
+    <hr class="hr"><div class="grid2">
+      <label class="f"><span>新职位名称</span><input class="in" id="nr-label" placeholder="例：跟单主管"></label>
+      <label class="f"><span>权限模板</span><select class="in" id="nr-template">
+        <option value="sales">业务员权限（可建单、改自己录入的订单）</option>
+        <option value="follower">下厂员权限（只能给自己负责的订单打卡）</option></select></label></div>
+    <button class="btn" onclick="A.addRole()">添加职位</button></div>
 
   <div class="card"><h2><span class="bar"></span>自定义字段</h2>
     <p class="sub">“订单明细”和“生产明细”板块的字段可以增减，不是写死的固定表单</p>
@@ -421,21 +497,26 @@ function vAccount() {
   return `<div class="card"><h2><span class="bar"></span>我的账号</h2>
     <div class="kv" style="margin-bottom:14px"><span class="k">姓名</span><span class="v">${esc(m.name)}</span>
       <span class="k">手机号</span><span class="v num">${esc(m.phone)}</span>
-      <span class="k">角色</span><span class="v">${ROLE[m.role]}</span></div>
+      <span class="k">职位</span><span class="v">${esc(roleLabelOf(m))}</span></div>
     <hr class="hr"><p class="sub"><b>修改密码</b></p>
     <div class="grid2">
       <label class="f"><span>新密码</span><input class="in" type="password" id="my-p1"></label>
       <label class="f"><span>确认新密码</span><input class="in" type="password" id="my-p2"></label></div>
-    <button class="btn" onclick="A.changeMyPw()">确认修改</button></div>`;
+    <button class="btn" onclick="A.changeMyPw()">确认修改</button></div>
+  <div class="card"><h2><span class="bar"></span>我的打卡记录
+    <span style="font-weight:400;font-size:13px;color:var(--ink-2)">${state.myLogs ? `共 ${state.myLogs.length} 条` : ""}</span></h2>
+    ${logListHtml(state.myLogs)}</div>`;
 }
 
 /* ================= 动作 ================= */
 const A = {
   modalOk() {
     const st = modalState;
-    const v = st && st.input ? ($("m-input") ? $("m-input").value : "") : null;
+    if (!st) return;
+    const v = st.input ? ($("m-input") ? $("m-input").value : "") : null;
+    if (st.keepOpenOnOk) { if (st.onOk) st.onOk(v); return; }  // 由 onOk 自己决定何时关闭
     modalState = null; renderModal();
-    if (st && st.onOk) st.onOk(v);
+    if (st.onOk) st.onOk(v);
   },
   modalCancel() { modalState = null; renderModal(); },
 
@@ -452,12 +533,26 @@ const A = {
     state.token = null; state.me = null; localStorage.removeItem("daka_token");
     route = { v: "orders", id: null }; render();
   },
-  togglePwBox() { const b = $("pwbox"); b.style.display = b.style.display === "none" ? "" : "none"; },
-  async resetPw() {
-    const phone = $("fp-phone").value.trim(), p1 = $("fp-p1").value, p2 = $("fp-p2").value;
-    if (!p1 || p1 !== p2) return toast("两次输入的新密码不一致");
-    try { await api("POST", "/password/reset", { phone, newPassword: p1 }); toast("密码已修改，请用新密码登录"); A.togglePwBox(); }
-    catch (e) { toast((e && e.error) || "修改失败"); }
+  // 忘记密码 / 修改密码：弹窗形式，不再撑长登录页
+  openForgotPw() {
+    modal({
+      title: "忘记密码 / 修改密码", okText: "确认修改",
+      body: "输入手机号和新密码即可重置（公司内部系统，不需要短信验证码）。",
+      html: `<label class="f"><span>手机号</span><input class="in" id="fp-phone" inputmode="tel"></label>
+        <label class="f"><span>新密码</span><input class="in" id="fp-p1" type="password"></label>
+        <label class="f" style="margin-bottom:0"><span>确认新密码</span><input class="in" id="fp-p2" type="password"></label>`,
+      keepOpenOnOk: true,
+      onOk: async () => {
+        const phone = ($("fp-phone").value || "").trim();
+        const p1 = $("fp-p1").value, p2 = $("fp-p2").value;
+        if (!phone) return toast("请填写手机号");
+        if (!p1 || p1 !== p2) return toast("两次输入的新密码不一致");
+        try {
+          await api("POST", "/password/reset", { phone, newPassword: p1 });
+          A.modalCancel(); toast("密码已修改，请用新密码登录");
+        } catch (e) { toast((e && e.error) || "修改失败"); }
+      }
+    });
   },
   async changeMyPw() {
     const p1 = $("my-p1").value, p2 = $("my-p2").value;
@@ -569,7 +664,7 @@ const A = {
   },
   async changeRole(id, role) {
     const u = userById(id);
-    await run(() => api("PATCH", "/users/" + id, { role }), `已把 ${u ? u.name : ""} 的职位改为${ROLE[role]}`);
+    await run(() => api("PATCH", "/users/" + id, { role }), `已把 ${u ? u.name : ""} 的职位改为${labelForRoleKey(role)}`);
   },
   deleteUser(id) {
     const u = userById(id); if (!u) return;
@@ -599,6 +694,88 @@ const A = {
   },
   async delFactory(kind, encName) {
     await run(() => api("DELETE", `/factories/${kind}/${encName}`), "已删除");
+  },
+
+  /* ---- 职位管理 ---- */
+  async addRole() {
+    const label = $("nr-label").value.trim(), template = $("nr-template").value;
+    if (!label) return toast("请填写职位名称");
+    await run(() => api("POST", "/roles", { label, template }), "职位已添加：" + label);
+  },
+  delRole(k) {
+    const r = state.roles.find(x => x.k === k); if (!r) return;
+    modal({ title: `删除职位「${r.label}」？`, body: "只有没人担任该职位时才能删除。", danger: true, okText: "确认删除",
+      onOk: () => run(() => api("DELETE", "/roles/" + k), "职位已删除") });
+  },
+
+  /* ---- 打卡记录 ---- */
+  async loadMyLogs(userId) {
+    state.myLogs = null;
+    try { state.myLogs = await api("GET", `/users/${userId}/logs`); }
+    catch (e) { state.myLogs = []; toast((e && e.error) || "读取失败"); }
+    render();
+  },
+  viewStaffLogs(id) { go("staffLogs", id); },
+
+  /* ---- 聊天 ---- */
+  async loadContacts(silent) {
+    try {
+      const list = await api("GET", "/chat/contacts");
+      const changed = JSON.stringify(list) !== JSON.stringify(state.chat.contacts);
+      state.chat.contacts = list;
+      if (changed && !silent && route.v === "chat" && !state.chat.activeId) {
+        const box = $("chat-contacts"); if (box) box.innerHTML = contactsHtml(); else render();
+      }
+    } catch (e) { }
+  },
+  async openChat(userId) {
+    state.chat.activeId = userId; state.chat.messages = []; state.chat.contact = userById(userId) || null;
+    state.chat.draft = "";
+    render();
+    await A.loadConversation();
+    await A.refreshUnread();
+  },
+  closeChat() {
+    state.chat.activeId = null; state.chat.messages = []; state.chat.contact = null; state.chat.draft = "";
+    A.loadContacts(true).then(render);
+    render();
+  },
+  onDraft(v) { state.chat.draft = v; },
+  async loadConversation() {
+    if (!state.chat.activeId) return;
+    try {
+      const r = await api("GET", "/chat/with/" + state.chat.activeId);
+      const changed = JSON.stringify(r.messages) !== JSON.stringify(state.chat.messages);
+      state.chat.contact = r.contact; state.chat.messages = r.messages;
+      if (changed) {
+        // 只更新消息区，避免打断正在输入的内容
+        const box = $("chat-msgs");
+        if (box) { box.innerHTML = messagesHtml(); box.scrollTop = box.scrollHeight; }
+        else render();
+      }
+    } catch (e) { }
+  },
+  async sendMsg() {
+    const el = $("chat-text"); if (!el) return;
+    const text = (el.value || "").trim();
+    if (!text) return;
+    el.value = ""; state.chat.draft = "";
+    try {
+      await api("POST", "/chat/with/" + state.chat.activeId, { text });
+      await A.loadConversation();
+      A.loadContacts(true);
+    } catch (e) { el.value = text; state.chat.draft = text; toast((e && e.error) || "发送失败"); }
+  },
+  async refreshUnread() {
+    try {
+      const u = await api("GET", "/chat/unread");
+      const changed = u.total !== state.unread.total;
+      state.unread = u;
+      if (changed) {
+        const nav = document.querySelector(".nav");
+        if (nav) render();
+      }
+    } catch (e) { }
   },
 
   async exportData() {
@@ -703,4 +880,15 @@ window.go = go; window.A = A;
     catch (e) { state.token = null; localStorage.removeItem("daka_token"); }
   }
   render();
+  if (state.me) { A.refreshUnread(); A.loadContacts(true); }
+
+  // 轮询：未读数每 10 秒；正在看的会话每 4 秒（规模小，轮询足够，无需 WebSocket）
+  setInterval(() => { if (state.me) A.refreshUnread(); }, 10000);
+  setInterval(() => {
+    if (!state.me) return;
+    if (route.v === "chat") {
+      if (state.chat.activeId) A.loadConversation();
+      else A.loadContacts();
+    }
+  }, 4000);
 })();

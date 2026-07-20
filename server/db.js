@@ -35,6 +35,16 @@ db.exec(`
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS messages (
+    id TEXT PRIMARY KEY,
+    from_user TEXT NOT NULL,
+    to_user TEXT NOT NULL,
+    text TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    read_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_msg_pair ON messages(from_user, to_user, created_at);
+  CREATE INDEX IF NOT EXISTS idx_msg_unread ON messages(to_user, read_at);
   CREATE TABLE IF NOT EXISTS orders (
     id TEXT PRIMARY KEY,
     season TEXT,
@@ -76,6 +86,11 @@ function seedIfEmpty() {
   const f2 = mkUser("刘敏", "13877778888", "follower");
   const nameOf = { [boss]: "老板", [s1]: "陈晓芳", [s2]: "林志远", [f1]: "王建国", [f2]: "刘敏" };
 
+  // 职位：label 可自由命名，template 决定权限（sales=业务员权限，follower=下厂员权限）
+  setSetting("roles", [
+    { k: "sales", label: "业务员", template: "sales", core: true },
+    { k: "follower", label: "下厂员", template: "follower", core: true }
+  ]);
   setSetting("factories", {
     emb: ["锦绣绣花厂", "华艺印花厂", "美达绣印"],
     prod: ["宏发制衣厂", "联诚服装厂", "永盛制衣"],

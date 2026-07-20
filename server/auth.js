@@ -10,7 +10,7 @@ const jwt = require("jsonwebtoken");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-const { db, DATA_DIR } = require("./db");
+const { db, getSetting, DATA_DIR } = require("./db");
 
 // JWT 密钥：优先环境变量，否则在 data 目录生成并持久化（重启后 token 不失效）
 function loadSecret() {
@@ -29,9 +29,27 @@ const hashPassword = (pw) => bcrypt.hashSync(String(pw), 10);
 const verifyPassword = (pw, hash) => bcrypt.compareSync(String(pw), hash);
 const signToken = (user) => jwt.sign({ id: user.id }, SECRET, { expiresIn: "30d" });
 
+/**
+ * 职位 -> 权限模板。管理员固定为 admin；其余职位（含管理员自定义的）
+ * 由 settings.roles 里的 template 决定用「业务员」还是「下厂员」那套权限。
+ * 查不到的职位一律按最小权限(follower)处理，避免权限真空。
+ */
+function roleTemplate(roleKey) {
+  if (roleKey === "admin") return "admin";
+  const r = getSetting("roles", []).find(x => x.k === roleKey);
+  return r ? r.template : "follower";
+}
+const templateOf = u => (u ? roleTemplate(u.role) : null);
+function roleLabel(roleKey) {
+  if (roleKey === "admin") return "管理员";
+  const r = getSetting("roles", []).find(x => x.k === roleKey);
+  return r ? r.label : roleKey;
+}
+
 function userPublic(u) {
   if (!u) return null;
-  return { id: u.id, name: u.name, phone: u.phone, role: u.role, deleted: !!u.deleted };
+  return { id: u.id, name: u.name, phone: u.phone, role: u.role,
+    roleLabel: roleLabel(u.role), template: roleTemplate(u.role), deleted: !!u.deleted };
 }
 const userById = (id) => db.prepare("SELECT * FROM users WHERE id = ?").get(id);
 
@@ -63,7 +81,7 @@ const isAdmin = (u) => u && u.role === "admin";
 function canEditBasic(u, order) {
   if (!u) return false;
   if (u.role === "admin") return true;
-  return u.role === "sales" && (order.created_by === u.id || (order.data.values || {}).sales === u.id);
+  return templateOf(u) === "sales" && (order.created_by === u.id || (order.data.values || {}).sales === u.id);
 }
 // 能否在某板块打卡：管理员；本单负责下厂员；订单明细板块业务员本人也可更新进度
 function canAddLog(u, order, section) {
@@ -78,5 +96,6 @@ const canTouchEntry = (u, entry) => u && (u.role === "admin" || entry.by === u.i
 
 module.exports = {
   hashPassword, verifyPassword, signToken, userPublic, userById,
-  authRequired, adminRequired, isAdmin, canEditBasic, canAddLog, canTouchEntry
+  authRequired, adminRequired, isAdmin, canEditBasic, canAddLog, canTouchEntry,
+  roleTemplate, templateOf, roleLabel
 };

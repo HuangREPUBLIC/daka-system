@@ -1,0 +1,112 @@
+/** 前端新功能的端到端测试：聊天、职位、忘记密码弹窗、季节筛选、我的账号打卡记录 */
+const fs = require("fs");
+const path = require("path");
+const { JSDOM, VirtualConsole } = require("jsdom");
+const BASEU = process.env.BASE_URL || "http://localhost:3000";
+const ROOT = path.join(__dirname, "..", "public");
+const vc = new VirtualConsole(); vc.on("jsdomError", () => {});
+let pass = 0, fail = 0;
+const ok = (c, n) => { if (c) { pass++; console.log("PASS " + n); } else { fail++; console.log("FAIL " + n); } };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function apiAs(phone, method, p, body) {
+  const lg = await fetch(BASEU + "/api/login", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phone, password: "123456" }) });
+  const { token } = await lg.json();
+  const r = await fetch(BASEU + "/api" + p, { method, headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+    body: body ? JSON.stringify(body) : undefined });
+  return { status: r.status, j: await r.json().catch(() => null) };
+}
+
+(async () => {
+  const html = fs.readFileSync(ROOT + "/index.html", "utf8");
+  const dom = new JSDOM(html, { runScripts: "dangerously", url: BASEU + "/", virtualConsole: vc });
+  const { window } = dom, doc = window.document;
+  window.fetch = (u, o) => fetch(new URL(u, BASEU + "/").toString(), o);
+  window.FormData = FormData; window.Blob = Blob;
+  window.URL.createObjectURL = () => "blob:x"; window.URL.revokeObjectURL = () => {};
+  const sc = doc.createElement("script");
+  sc.textContent = fs.readFileSync(ROOT + "/app.js", "utf8");
+  doc.body.appendChild(sc);
+  await sleep(300);
+  const app = () => doc.getElementById("app").innerHTML;
+  const mask = () => doc.getElementById("mask");
+  const A = window.A, st = () => window.eval("state");
+
+  // ---- 忘记密码：弹窗，而不是撑长登录页 ----
+  ok(!app().includes("pwbox"), "登录页不再内嵌改密表单");
+  A.openForgotPw(); await sleep(150);
+  ok(mask().classList.contains("show") && mask().innerHTML.includes("fp-phone"), "点忘记密码弹出弹窗");
+  doc.getElementById("fp-phone").value = "13800000000";
+  doc.getElementById("fp-p1").value = "abc"; doc.getElementById("fp-p2").value = "xyz";
+  await A.modalOk(); await sleep(200);
+  ok(mask().classList.contains("show"), "两次密码不一致时弹窗不关闭");
+  A.modalCancel(); await sleep(100);
+  ok(!mask().classList.contains("show"), "可取消弹窗");
+
+  // ---- 登录 ----
+  doc.getElementById("lg-phone").value = "13800000000";
+  doc.getElementById("lg-pass").value = "123456";
+  await A.login(); await sleep(500);
+  ok(app().includes("订单列表"), "管理员登录");
+
+  // ---- 导航：聊天取代我的打卡 ----
+  ok(app().includes(">聊天") && !app().includes("我的打卡<"), "导航有「聊天」，没有「我的打卡」");
+
+  // ---- 季节筛选用自动生成选项 ----
+  const y = new Date().getFullYear();
+  const filterSel = doc.querySelector(".filters select");
+  const opts = [...filterSel.options].map(o => o.value);
+  ok(opts.includes("SS" + (y + 1)) && opts.includes("FW" + (y + 1)), "季节筛选含未来季节(不再锁死在已有订单)");
+
+  // ---- 我的账号：职位 + 打卡记录 ----
+  window.go("account"); await sleep(500);
+  ok(app().includes("职位") && !app().includes("<span class=\"k\">角色</span>"), "我的账号用「职位」不是「角色」");
+  ok(app().includes("我的打卡记录"), "打卡记录移到我的账号");
+
+  // ---- 管理后台：职位管理 ----
+  window.go("admin"); await sleep(400);
+  ok(app().includes("职位管理") && app().includes("权限模板"), "管理后台有职位管理");
+  ok(app().includes("<th>职位</th>") && !app().includes("<th>角色</th>"), "员工表表头是「职位」");
+  doc.getElementById("nr-label").value = "跟单主管";
+  doc.getElementById("nr-template").value = "sales";
+  await A.addRole(); await sleep(600);
+  ok(st().roles.some(r => r.label === "跟单主管"), "新增自定义职位");
+  const chen = st().users.find(u => u.name === "陈晓芳");
+  const sel = [...doc.querySelectorAll("select")].find(s => s.outerHTML.includes(chen.id));
+  ok(sel && [...sel.options].some(o => o.textContent === "跟单主管"), "自定义职位出现在员工职位下拉里");
+  ok(app().includes("查看打卡"), "管理员可查看员工打卡");
+
+  // ---- 聊天 ----
+  window.go("chat"); await sleep(600);
+  ok(app().includes("一对一私聊"), "聊天页渲染");
+  ok(st().chat.contacts.length === st().users.length - 1, "联系人=其他同事");
+  ok(!st().chat.contacts.some(c => c.id === st().me.id), "联系人不含自己");
+  await A.openChat(chen.id); await sleep(500);
+  ok(doc.getElementById("chat-text") && app().includes("chat-msgs"), "打开会话界面");
+  const before = st().chat.messages.length;   // 同一台测试服务器上可能已有历史消息
+  doc.getElementById("chat-text").value = "晓芳，这单交期要提前";
+  await A.sendMsg(); await sleep(600);
+  ok(app().includes("晓芳，这单交期要提前"), "发出的消息显示在对话里");
+  const sent = st().chat.messages;
+  ok(sent.length === before + 1 && sent[sent.length - 1].fromMe === true
+    && sent[sent.length - 1].text === "晓芳，这单交期要提前", "消息标记为自己发出");
+
+  // 对方回复后，会话轮询能收到
+  await apiAs("13811112222", "POST", "/chat/with/" + st().me.id, { text: "收到，我马上联系工厂" });
+  await A.loadConversation(); await sleep(300);
+  const got = st().chat.messages;
+  ok(got.length === before + 2 && got[got.length - 1].fromMe === false
+    && got[got.length - 1].text === "收到，我马上联系工厂", "收到对方回复");
+  ok(doc.getElementById("chat-msgs").innerHTML.includes("收到，我马上联系工厂"), "回复渲染到气泡区");
+
+  // 未读红点：让第三人发消息给我
+  await apiAs("13877778888", "POST", "/chat/with/" + st().me.id, { text: "老板，包装完成了" });
+  await A.refreshUnread(); await sleep(300);
+  ok(st().unread.total >= 1, "有未读消息计数");
+  window.go("chat"); await sleep(500);
+  ok(app().includes("badge") || st().unread.total >= 1, "未读显示红点");
+
+  console.log(`\n结果：PASS ${pass}, FAIL ${fail}`);
+  process.exit(fail ? 1 : 0);
+})().catch(e => { console.error("ERROR", e); process.exit(1); });

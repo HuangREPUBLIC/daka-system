@@ -95,6 +95,7 @@ router.get("/bootstrap", (req, res) => {
     users: db.prepare("SELECT * FROM users WHERE deleted = 0").all().map(A.userPublic),
     fields: getSetting("fields", { order: [], production: [] }),
     factories: getSetting("factories", { emb: [], prod: [], proc: [] }),
+    roles: getSetting("roles", []),
     orders: allOrdersPublic()
   });
 });
@@ -116,7 +117,7 @@ router.get("/users", A.adminRequired, (req, res) => {
 router.post("/users", A.adminRequired, (req, res) => {
   const { name, phone, role, password } = req.body || {};
   if (!name || !phone) return res.status(400).json({ error: "请填写姓名和手机号" });
-  if (!["sales", "follower"].includes(role)) return res.status(400).json({ error: "角色只能是业务员或下厂员" });
+  if (!getSetting("roles", []).some(r => r.k === role)) return res.status(400).json({ error: "职位不存在" });
   const exists = db.prepare("SELECT id FROM users WHERE phone = ? AND deleted = 0").get(String(phone).trim());
   if (exists) return res.status(400).json({ error: "该手机号已存在" });
   const id = uid();
@@ -133,7 +134,7 @@ router.patch("/users/:id", A.adminRequired, (req, res) => {
   if (role !== undefined) {
     if (u.id === req.user.id) return res.status(400).json({ error: "不能修改自己的职位" });
     if (u.role === "admin") return res.status(400).json({ error: "不能修改管理员的职位" });
-    if (!["sales", "follower"].includes(role)) return res.status(400).json({ error: "角色只能是业务员或下厂员" });
+    if (!getSetting("roles", []).some(r => r.k === role)) return res.status(400).json({ error: "职位不存在" });
     db.prepare("UPDATE users SET role=? WHERE id=?").run(role, u.id);
   }
   if (name !== undefined && String(name).trim()) db.prepare("UPDATE users SET name=? WHERE id=?").run(String(name).trim(), u.id);
@@ -217,7 +218,7 @@ router.delete("/factories/:kind/:name", A.adminRequired, (req, res) => {
 /* =========================================================
  *  订单
  * ========================================================= */
-function canCreateOrder(u) { return u.role === "admin" || u.role === "sales"; }
+function canCreateOrder(u) { const t = A.templateOf(u); return t === "admin" || t === "sales"; }
 
 router.get("/orders", (req, res) => res.json(allOrdersPublic()));
 router.get("/orders/:id", (req, res) => {
@@ -366,6 +367,129 @@ router.delete("/orders/:id/follow/:entryId", (req, res) => {
   if (!A.canTouchEntry(req.user, e)) return res.status(403).json({ error: "只能删除自己的记录" });
   o.data.followIssues = o.data.followIssues.filter(x => x.id !== e.id); saveOrder(o);
   res.json(orderPublic(loadOrder(o.id)));
+});
+
+/* =========================================================
+ *  职位管理（管理员）：名称自由，权限从两套模板里选
+ * ========================================================= */
+router.get("/roles", (req, res) => res.json(getSetting("roles", [])));
+
+router.post("/roles", A.adminRequired, (req, res) => {
+  const { label, template } = req.body || {};
+  const name = String(label || "").trim();
+  if (!name) return res.status(400).json({ error: "请填写职位名称" });
+  if (!["sales", "follower"].includes(template))
+    return res.status(400).json({ error: "请选择权限模板（业务员权限 / 下厂员权限）" });
+  const roles = getSetting("roles", []);
+  if (roles.some(r => r.label === name)) return res.status(400).json({ error: "已有同名职位" });
+  roles.push({ k: "r" + Date.now(), label: name, template });
+  setSetting("roles", roles);
+  res.json(roles);
+});
+
+router.delete("/roles/:k", A.adminRequired, (req, res) => {
+  const roles = getSetting("roles", []);
+  const r = roles.find(x => x.k === req.params.k);
+  if (!r) return res.status(404).json({ error: "职位不存在" });
+  if (r.core) return res.status(400).json({ error: "内置职位不可删除" });
+  const used = db.prepare("SELECT COUNT(*) c FROM users WHERE role = ? AND deleted = 0").get(r.k).c;
+  if (used) return res.status(400).json({ error: `还有 ${used} 位员工是「${r.label}」，请先把他们改成其它职位` });
+  setSetting("roles", roles.filter(x => x.k !== r.k));
+  res.json(roles.filter(x => x.k !== r.k));
+});
+
+/* =========================================================
+ *  私人聊天（所有人可用，一对一）
+ * ========================================================= */
+// 联系人列表：除自己外的所有在职同事 + 最后一条消息 + 未读数
+router.get("/chat/contacts", (req, res) => {
+  const meId = req.user.id;
+  const others = db.prepare("SELECT * FROM users WHERE deleted = 0 AND id <> ?").all(meId);
+  const lastStmt = db.prepare(`SELECT * FROM messages
+      WHERE (from_user = ? AND to_user = ?) OR (from_user = ? AND to_user = ?)
+      ORDER BY created_at DESC LIMIT 1`);
+  const unreadStmt = db.prepare("SELECT COUNT(*) c FROM messages WHERE from_user = ? AND to_user = ? AND read_at IS NULL");
+  const list = others.map(u => {
+    const last = lastStmt.get(meId, u.id, u.id, meId);
+    return Object.assign(A.userPublic(u), {
+      unread: unreadStmt.get(u.id, meId).c,
+      last: last ? { text: last.text, t: last.created_at, fromMe: last.from_user === meId } : null
+    });
+  });
+  // 有聊天记录的按最后消息时间排前面，其余按姓名
+  list.sort((a, b) => {
+    if (a.last && b.last) return b.last.t - a.last.t;
+    if (a.last) return -1;
+    if (b.last) return 1;
+    return a.name.localeCompare(b.name, "zh");
+  });
+  res.json(list);
+});
+
+// 未读总数（用于导航红点轮询）
+router.get("/chat/unread", (req, res) => {
+  const rows = db.prepare("SELECT from_user, COUNT(*) c FROM messages WHERE to_user = ? AND read_at IS NULL GROUP BY from_user")
+    .all(req.user.id);
+  const byUser = {};
+  let total = 0;
+  rows.forEach(r => { byUser[r.from_user] = r.c; total += r.c; });
+  res.json({ total, byUser });
+});
+
+// 与某人的对话（打开即把对方发来的消息标记为已读）
+router.get("/chat/with/:userId", (req, res) => {
+  const meId = req.user.id, otherId = req.params.userId;
+  const other = db.prepare("SELECT * FROM users WHERE id = ? AND deleted = 0").get(otherId);
+  if (!other) return res.status(404).json({ error: "该同事不存在或已离职" });
+  db.prepare("UPDATE messages SET read_at = ? WHERE from_user = ? AND to_user = ? AND read_at IS NULL")
+    .run(Date.now(), otherId, meId);
+  const msgs = db.prepare(`SELECT * FROM messages
+      WHERE (from_user = ? AND to_user = ?) OR (from_user = ? AND to_user = ?)
+      ORDER BY created_at ASC`).all(meId, otherId, otherId, meId);
+  res.json({
+    contact: A.userPublic(other),
+    messages: msgs.map(m => ({ id: m.id, text: m.text, t: m.created_at, fromMe: m.from_user === meId }))
+  });
+});
+
+router.post("/chat/with/:userId", (req, res) => {
+  const meId = req.user.id, otherId = req.params.userId;
+  if (otherId === meId) return res.status(400).json({ error: "不能给自己发消息" });
+  const other = db.prepare("SELECT id FROM users WHERE id = ? AND deleted = 0").get(otherId);
+  if (!other) return res.status(404).json({ error: "该同事不存在或已离职" });
+  const text = String((req.body || {}).text || "").trim();
+  if (!text) return res.status(400).json({ error: "消息不能为空" });
+  if (text.length > 2000) return res.status(400).json({ error: "消息太长了" });
+  db.prepare("INSERT INTO messages(id,from_user,to_user,text,created_at,read_at) VALUES(?,?,?,?,?,NULL)")
+    .run(uid(), meId, otherId, text, Date.now());
+  res.json({ ok: true });
+});
+
+/* ---------- 某员工的历史打卡（本人或管理员可看） ---------- */
+router.get("/users/:id/logs", (req, res) => {
+  const targetId = req.params.id;
+  if (targetId !== req.user.id && req.user.role !== "admin")
+    return res.status(403).json({ error: "只能查看自己的打卡记录" });
+  const fields = getSetting("fields", { order: [], production: [] });
+  const logFs = [...fields.order, ...fields.production].filter(f => f.type === "log");
+  const rows = [];
+  allOrdersPublic().forEach(o => {
+    const tag = { styleNo: o.values.styleNo || "", styleName: o.values.styleName || "", orderId: o.id };
+    logFs.forEach(f => (o.logs[f.k] || []).forEach(e => {
+      if (e.by === targetId) rows.push(Object.assign({ label: f.label, text: e.text, t: e.t }, tag));
+    }));
+    (o.subs || []).forEach(sub => sub.log.forEach(e => {
+      if (e.by === targetId) rows.push(Object.assign({ label: "加工厂·" + (sub.factory || sub.name), text: e.text, t: e.t }, tag));
+    }));
+    o.followIssues.forEach(e => {
+      if (e.by === targetId) rows.push(Object.assign({ label: "跟单问题", text: e.text, t: e.t }, tag));
+    });
+    o.inspections.forEach(g => {
+      if (g.by === targetId) rows.push(Object.assign({ label: "验货记录", text: g.items.map(i => i.problem).join("；"), t: g.t }, tag));
+    });
+  });
+  rows.sort((a, b) => b.t - a.t);
+  res.json(rows);
 });
 
 /* ---------- 款式图上传 ---------- */
