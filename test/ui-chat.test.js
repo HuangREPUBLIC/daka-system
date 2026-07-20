@@ -83,7 +83,8 @@ async function apiAs(phone, method, p, body) {
 
   // ---- 聊天 ----
   window.go("chat"); await sleep(600);
-  ok(app().includes('data-view="chat"') && app().includes("同事"), "聊天页渲染");
+  ok(app().includes('data-view="chat"') && app().includes("chat-contacts"), "聊天页渲染");
+  ok(!app().includes("group-title\">同事") && !app().includes('class="c-role"'), "聊天页不显示「同事」标题和联系人职位");
   ok(st().chat.contacts.length === st().users.length - 1, "联系人=其他同事");
   ok(!st().chat.contacts.some(c => c.id === st().me.id), "联系人不含自己");
   await A.openChat(chen.id); await sleep(500);

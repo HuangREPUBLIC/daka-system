@@ -491,7 +491,7 @@ function contactsHtml() {
   return list.map(c => `<div class="contact" onclick="A.openChat('${c.id}')">
     ${avatarHtml(c.name)}
     <div class="c-main">
-      <div class="c-top"><b>${esc(c.name)}</b><span class="c-role">${esc(c.roleLabel || "")}</span>
+      <div class="c-top"><b>${esc(c.name)}</b>
         ${c.last ? `<span class="c-time num">${fmtT(c.last.t)}</span>` : ""}</div>
       <div class="c-last">${c.last ? (c.last.fromMe ? "我：" : "") + esc(c.last.text) : "打个招呼吧"}</div>
     </div>
@@ -528,8 +528,7 @@ function messagesHtml() {
 }
 function vChat() {
   if (!state.chat.activeId) {
-    return `<section class="group">
-      <div class="group-title">同事</div>
+    return `<section class="group" style="margin-top:4px">
       <div class="card" id="chat-contacts">${contactsHtml()}</div></section>`;
   }
   const a = state.chat.att;
