@@ -27,7 +27,9 @@ const SECRET = loadSecret();
 
 const hashPassword = (pw) => bcrypt.hashSync(String(pw), 10);
 const verifyPassword = (pw, hash) => bcrypt.compareSync(String(pw), hash);
-const signToken = (user) => jwt.sign({ id: user.id }, SECRET, { expiresIn: "30d" });
+// 不设过期时间：只要用户不主动退出，登录状态一直保持。
+// 账号被管理员删除时 authRequired 会当场拦下，所以不会留下"删了还能用"的口子。
+const signToken = (user) => jwt.sign({ id: user.id }, SECRET);
 
 /**
  * 职位 -> 权限模板。管理员固定为 admin；其余职位（含管理员自定义的）

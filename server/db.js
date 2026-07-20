@@ -40,6 +40,7 @@ db.exec(`
     from_user TEXT NOT NULL,
     to_user TEXT NOT NULL,
     text TEXT NOT NULL,
+    attachment TEXT,
     created_at INTEGER NOT NULL,
     read_at INTEGER
   );
@@ -75,7 +76,16 @@ const DEFAULT_ROLES = [
   { k: "sales", label: "业务员", template: "sales", core: true },
   { k: "follower", label: "下厂员", template: "follower", core: true }
 ];
+function columnExists(table, col) {
+  return db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === col);
+}
+
 function ensureDefaults() {
+  // 老库补列：聊天附件
+  if (!columnExists("messages", "attachment")) {
+    db.exec("ALTER TABLE messages ADD COLUMN attachment TEXT");
+    console.log("[db] 已为 messages 表补上 attachment 列");
+  }
   const roles = getSetting("roles", null);
   if (!roles || !roles.length) {
     setSetting("roles", DEFAULT_ROLES);

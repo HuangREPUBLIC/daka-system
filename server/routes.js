@@ -413,7 +413,8 @@ router.get("/chat/contacts", (req, res) => {
     const last = lastStmt.get(meId, u.id, u.id, meId);
     return Object.assign(A.userPublic(u), {
       unread: unreadStmt.get(u.id, meId).c,
-      last: last ? { text: last.text, t: last.created_at, fromMe: last.from_user === meId } : null
+      last: last ? { text: last.text || (last.attachment ? "[附件]" : ""), t: last.created_at,
+        fromMe: last.from_user === meId } : null
     });
   });
   // 有聊天记录的按最后消息时间排前面，其余按姓名
@@ -448,7 +449,8 @@ router.get("/chat/with/:userId", (req, res) => {
       ORDER BY created_at ASC`).all(meId, otherId, otherId, meId);
   res.json({
     contact: A.userPublic(other),
-    messages: msgs.map(m => ({ id: m.id, text: m.text, t: m.created_at, fromMe: m.from_user === meId }))
+    messages: msgs.map(m => ({ id: m.id, text: m.text, t: m.created_at, fromMe: m.from_user === meId,
+      attachment: m.attachment ? JSON.parse(m.attachment) : null }))
   });
 });
 
@@ -458,10 +460,11 @@ router.post("/chat/with/:userId", (req, res) => {
   const other = db.prepare("SELECT id FROM users WHERE id = ? AND deleted = 0").get(otherId);
   if (!other) return res.status(404).json({ error: "该同事不存在或已离职" });
   const text = String((req.body || {}).text || "").trim();
-  if (!text) return res.status(400).json({ error: "消息不能为空" });
+  const att = (req.body || {}).attachment || null;
+  if (!text && !att) return res.status(400).json({ error: "消息不能为空" });
   if (text.length > 2000) return res.status(400).json({ error: "消息太长了" });
-  db.prepare("INSERT INTO messages(id,from_user,to_user,text,created_at,read_at) VALUES(?,?,?,?,?,NULL)")
-    .run(uid(), meId, otherId, text, Date.now());
+  db.prepare("INSERT INTO messages(id,from_user,to_user,text,attachment,created_at,read_at) VALUES(?,?,?,?,?,?,NULL)")
+    .run(uid(), meId, otherId, text, att ? JSON.stringify(att) : null, Date.now());
   res.json({ ok: true });
 });
 
@@ -504,6 +507,23 @@ const upload = multer({
 router.post("/upload", upload.single("image"), (req, res) => {
   if (!req.file) return res.status(400).json({ error: "请选择图片文件" });
   res.json({ url: "/uploads/" + req.file.filename });
+});
+
+/* ---------- 聊天附件：图片和常见办公文件 ---------- */
+const OK_EXT = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic",
+  ".pdf", ".xlsx", ".xls", ".csv", ".doc", ".docx", ".ppt", ".pptx", ".txt", ".zip"];
+const chatUpload = multer({
+  storage, limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, OK_EXT.includes(path.extname(file.originalname || "").toLowerCase()))
+});
+router.post("/chat/upload", chatUpload.single("file"), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "不支持的文件类型，或文件超过 20MB" });
+  const name = Buffer.from(req.file.originalname || "文件", "latin1").toString("utf8");
+  res.json({
+    url: "/uploads/" + req.file.filename,
+    name, size: req.file.size,
+    isImage: /^image\//.test(req.file.mimetype)
+  });
 });
 
 /* ---------- 导出 Excel（管理员）---------- */

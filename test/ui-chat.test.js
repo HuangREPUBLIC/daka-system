@@ -51,7 +51,9 @@ async function apiAs(phone, method, p, body) {
   ok(app().includes("订单列表"), "管理员登录");
 
   // ---- 导航：聊天取代我的打卡 ----
-  ok(app().includes(">聊天") && !app().includes("我的打卡<"), "导航有「聊天」，没有「我的打卡」");
+  ok(app().includes('data-tab="chat"') && !app().includes('data-tab="mine"'), "Tab 栏有「聊天」，没有「我的打卡」");
+  ok(app().includes('class="tabbar"'), "底部 Tab 栏存在");
+  ok(app().includes('class="navbar"'), "顶部标题栏存在");
 
   // ---- 季节筛选用自动生成选项 ----
   const y = new Date().getFullYear();
@@ -61,7 +63,9 @@ async function apiAs(phone, method, p, body) {
 
   // ---- 我的账号：职位 + 打卡记录 ----
   window.go("account"); await sleep(500);
-  ok(app().includes("职位") && !app().includes("<span class=\"k\">角色</span>"), "我的账号用「职位」不是「角色」");
+  ok(!app().includes("角色"), "全站不再出现「角色」字样");
+  ok(app().includes(st().me.roleLabel), "我的账号显示职位名称");
+  ok(app().includes("退出登录"), "我的页面有退出登录入口");
   ok(app().includes("我的打卡记录"), "打卡记录移到我的账号");
 
   // ---- 管理后台：职位管理 ----

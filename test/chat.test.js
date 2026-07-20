@@ -50,6 +50,31 @@ async function call(m,p,t,b){const h={"Content-Type":"application/json"};if(t)h.
   ok((await call("GET","/chat/with/"+chen.id,fT)).j.messages.length===0,"第三方看不到别人的私聊");
   ok((await call("GET","/chat/contacts",null)).status===401,"未登录不能用聊天");
 
+  // ---- 聊天附件 ----
+  async function upload(token, filename, bytes, type) {
+    const fd = new FormData();
+    fd.append("file", new Blob([bytes], { type }), filename);
+    const r = await fetch(BASE + "/chat/upload", { method: "POST", headers: { Authorization: "Bearer " + token }, body: fd });
+    return { status: r.status, j: await r.json().catch(() => null) };
+  }
+  const png = Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489" +
+    "0000000a49444154789c6360000002000100ffff03000006000557bfabd40000000049454e44ae426082", "hex");
+  const up = await upload(aT, "工艺单.png", png, "image/png");
+  ok(up.status === 200 && up.j.url.startsWith("/uploads/") && up.j.isImage === true, "上传图片附件");
+  ok(up.j.name === "工艺单.png", "中文文件名不乱码");
+  const bad = await upload(aT, "病毒.exe", Buffer.from("MZ"), "application/octet-stream");
+  ok(bad.status === 400, "不支持的文件类型被拒绝");
+
+  ok((await call("POST", "/chat/with/" + chen.id, aT, { attachment: up.j })).status === 200, "只发附件不带文字也可以");
+  const withAtt = (await call("GET", "/chat/with/" + chen.id, aT)).j;
+  const lastMsg = withAtt.messages[withAtt.messages.length - 1];
+  ok(lastMsg.attachment && lastMsg.attachment.name === "工艺单.png" && lastMsg.attachment.isImage, "会话里带回附件信息");
+  const cc = (await call("GET", "/chat/contacts", cT)).j.find(c => c.name === "老板");
+  ok(cc && cc.last.text === "[附件]", "联系人预览显示 [附件]");
+  ok((await call("POST", "/chat/with/" + chen.id, aT, {})).status === 400, "既无文字又无附件被拒");
+  const dl = await fetch(BASE.replace("/api", "") + up.j.url);
+  ok(dl.status === 200, "附件可以下载");
+
   // 员工打卡记录
   ok((await call("GET","/users/"+chen.id+"/logs",aT)).status===200,"管理员可查员工打卡");
   ok((await call("GET","/users/"+chen.id+"/logs",fT)).status===403,"他人不可查别人打卡");
