@@ -1,0 +1,126 @@
+const fs = require("fs");
+const { JSDOM, VirtualConsole } = require("jsdom");
+// jsdom 未实现 window.scrollTo 等，属正常现象，静音掉避免干扰测试输出
+const vc = new VirtualConsole();
+vc.on("jsdomError", () => {});
+const BASEU = process.env.BASE_URL || "http://localhost:3000";
+const ROOT = require("path").join(__dirname, "..", "public");
+let pass = 0, fail = 0;
+const ok = (c, n) => { if (c) { pass++; console.log("PASS " + n); } else { fail++; console.log("FAIL " + n); } };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+(async () => {
+  const html = fs.readFileSync(ROOT + "/index.html", "utf8");
+  const dom = new JSDOM(html, { runScripts: "dangerously", url: BASEU + "/", virtualConsole: vc });
+  const { window } = dom, doc = window.document;
+  // 注入浏览器 API
+  window.fetch = (u, o) => fetch(new URL(u, BASEU + "/").toString(), o);
+  window.FormData = FormData; window.Blob = Blob; window.URL.createObjectURL = () => "blob:x";
+  window.URL.revokeObjectURL = () => {};
+  const sc = doc.createElement("script");
+  sc.textContent = fs.readFileSync(ROOT + "/app.js", "utf8");
+  doc.body.appendChild(sc);
+  await sleep(300);
+  const app = () => doc.getElementById("app").innerHTML;
+  const A = window.A;
+
+  ok(app().includes("跟单打卡系统") && app().includes("演示账号"), "未登录显示登录页");
+
+  // 错误密码
+  doc.getElementById("lg-phone").value = "13800000000";
+  doc.getElementById("lg-pass").value = "wrong";
+  await A.login(); await sleep(250);
+  ok(!app().includes("订单列表"), "错误密码不能登录");
+
+  // 管理员登录
+  doc.getElementById("lg-pass").value = "123456";
+  await A.login(); await sleep(400);
+  ok(app().includes("订单列表") && app().includes("管理后台"), "管理员登录成功");
+  ok(app().includes("SS27-T012") && app().includes("女装印花短袖T恤"), "订单列表来自服务端");
+  ok(window.localStorage.getItem("daka_token"), "token 已保存");
+
+  // 详情页 + 打卡
+  const st = () => window.eval("state");
+  const o1 = st().orders.find(o => o.values.styleNo === "SS27-T012");
+  window.go("detail", o1.id); await sleep(200);
+  ok(app().includes("一、订单明细") && app().includes("二、生产明细") && app().includes("三、验货问题") && app().includes("四、跟单问题"), "详情页四大板块");
+  doc.getElementById("txt-cutting").value = "E2E 打卡测试";
+  await A.addLog(o1.id, "cutting"); await sleep(400);
+  ok(app().includes("E2E 打卡测试"), "打卡后页面显示新记录");
+  // 服务端确认已持久化
+  const r = await fetch(BASEU + "/api/orders/" + o1.id, { headers: { Authorization: "Bearer " + st().token } });
+  const srv = await r.json();
+  ok(srv.logs.cutting.some(e => e.text === "E2E 打卡测试" && e.byName === "老板"), "打卡已存到服务端(带姓名)");
+
+  // 跟单问题
+  doc.getElementById("txt-follow").value = "E2E 跟单问题";
+  await A.addFollow(o1.id); await sleep(400);
+  ok(app().includes("E2E 跟单问题"), "跟单问题添加成功");
+
+  // 管理后台：职位下拉
+  window.go("admin"); await sleep(250);
+  ok(app().includes("职位可直接下拉修改"), "管理后台渲染");
+  const selCount = (app().match(/A\.changeRole\(/g) || []).length;
+  const admins = st().users.filter(u => u.role === "admin").length;
+  ok(selCount === st().users.length - admins, "每个非管理员都有职位下拉，管理员没有");
+  ok(!app().includes(`A.changeRole('${st().me.id}'`), "自己(管理员)没有职位下拉");
+  const wang = st().users.find(u => u.name === "王建国");
+  await A.changeRole(wang.id, "sales"); await sleep(400);
+  ok(st().users.find(u => u.id === wang.id).role === "sales", "下拉改职位：下厂员→业务员");
+  await A.changeRole(wang.id, "follower"); await sleep(400);
+  ok(st().users.find(u => u.id === wang.id).role === "follower", "改回下厂员");
+
+  // 删除员工二次确认
+  doc.getElementById("nu-name").value = "E2E临时";
+  doc.getElementById("nu-phone").value = "13900007777";
+  await A.addUser(); await sleep(400);
+  const tmp = st().users.find(u => u.phone === "13900007777");
+  ok(!!tmp, "创建员工成功");
+  A.deleteUser(tmp.id); await sleep(100);
+  ok(doc.getElementById("mask").classList.contains("show"), "删除弹出二次确认");
+  A.modalCancel(); await sleep(200);
+  ok(st().users.some(u => u.id === tmp.id), "取消则未删除");
+  A.deleteUser(tmp.id); await sleep(100);
+  await A.modalOk(); await sleep(500);
+  ok(!st().users.some(u => u.id === tmp.id), "确认后员工已删除");
+
+  // 新建订单（季节下拉）
+  window.go("new"); await sleep(200);
+  const seasonSel = doc.getElementById("nf-season");
+  ok(seasonSel && seasonSel.tagName === "SELECT", "季节是下拉");
+  const y = new Date().getFullYear();
+  const opts = [...seasonSel.options].map(o => o.value);
+  ok(opts.includes("SS" + y) && opts.includes("FW" + (y + 1)), "季节按当前年份自动生成");
+  seasonSel.value = "SS" + (y + 1);
+  doc.getElementById("nf-styleNo").value = "E2E-001";
+  doc.getElementById("nf-styleName").value = "E2E新款";
+  await A.createOrder(); await sleep(500);
+  ok(st().orders.some(o => o.values.styleNo === "E2E-001"), "新建订单成功");
+
+  // 批量导入：识别→可编辑→确认
+  window.go("new"); await sleep(200);
+  doc.getElementById("imp-text").value = "季节,货号,款式名,数量,业务员,下厂员\nSS2027,E2E-IMP1,导入甲,500,陈晓芳,王建国\nSS2027,E2E-IMP2,导入乙,800,查无此人,刘敏";
+  const beforeN = st().orders.length;
+  A.importText(); await sleep(250);
+  ok(st().orders.length === beforeN, "识别后未直接入库");
+  ok(doc.getElementById("imp0-styleNo").value === "E2E-IMP1", "识别结果填入可编辑输入框");
+  ok(doc.getElementById("imp1-sales").value === "", "查不到的业务员留空待选");
+  doc.getElementById("imp0-styleName").value = "导入甲改名";
+  A.removeImportRow(1); await sleep(200);
+  ok(doc.getElementById("imp0-styleName").value === "导入甲改名", "移除一单后其它修改保留");
+  await A.confirmImport(); await sleep(600);
+  ok(st().orders.some(o => o.values.styleName === "导入甲改名"), "导入时用户的修改被保存");
+  ok(!st().orders.some(o => o.values.styleNo === "E2E-IMP2"), "被移除的单未导入");
+
+  // 权限：下厂员视角
+  A.forceLogout(); await sleep(150);
+  doc.getElementById("lg-phone").value = "13877778888"; // 刘敏
+  doc.getElementById("lg-pass").value = "123456";
+  await A.login(); await sleep(400);
+  ok(!app().includes("管理后台") && !app().includes(">新建订单<"), "下厂员看不到管理后台/新建订单");
+  window.go("detail", o1.id); await sleep(250); // o1 归王建国
+  ok(!app().includes("txt-cutting"), "下厂员在别人订单上没有打卡框");
+
+  console.log(`\n结果：PASS ${pass}, FAIL ${fail}`);
+  process.exit(fail ? 1 : 0);
+})().catch(e => { console.error("ERROR", e); process.exit(1); });

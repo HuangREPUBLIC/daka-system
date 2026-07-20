@@ -1,0 +1,26 @@
+{
+  "name": "daka-system",
+  "version": "1.0.0",
+  "description": "服装生产跟单打卡系统 — 手机/电脑通用，多角色协作，实时共享",
+  "type": "commonjs",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node test/run.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.2.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "jsdom": "^24.1.0"
+  }
+}

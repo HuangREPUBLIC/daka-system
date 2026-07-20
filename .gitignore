@@ -1,0 +1,10 @@
+node_modules/
+data/
+*.log
+.DS_Store
+.env
+.omc/
+
+# 本地参考资料，不开源
+跟单打卡系统-需求文档.md
+gendan-daka.html
