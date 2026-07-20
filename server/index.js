@@ -1,10 +1,11 @@
 "use strict";
 const express = require("express");
 const path = require("path");
-const { seedIfEmpty, UPLOAD_DIR } = require("./db");
+const { seedIfEmpty, ensureDefaults, UPLOAD_DIR } = require("./db");
 const api = require("./routes");
 
 seedIfEmpty();
+ensureDefaults();   // 老库升级时补齐新增配置
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));

@@ -67,6 +67,23 @@ function setSetting(key, value) {
     .run(key, JSON.stringify(value));
 }
 
+/* ---------- 升级已有数据库：补齐新版本才有的配置 ----------
+ * seedIfEmpty 只在全新库上跑，已经在用的库不会执行，
+ * 所以新增的配置项要在这里补，否则老库升级后会缺配置。
+ */
+const DEFAULT_ROLES = [
+  { k: "sales", label: "业务员", template: "sales", core: true },
+  { k: "follower", label: "下厂员", template: "follower", core: true }
+];
+function ensureDefaults() {
+  const roles = getSetting("roles", null);
+  if (!roles || !roles.length) {
+    setSetting("roles", DEFAULT_ROLES);
+    console.log("[db] 已为现有数据库补齐职位配置");
+  }
+  if (!getSetting("fields", null)) console.warn("[db] 警告：缺少字段配置");
+}
+
 /* ---------- 首次运行填充演示数据 ---------- */
 function seedIfEmpty() {
   const n = db.prepare("SELECT COUNT(*) c FROM users").get().c;
@@ -87,10 +104,7 @@ function seedIfEmpty() {
   const nameOf = { [boss]: "老板", [s1]: "陈晓芳", [s2]: "林志远", [f1]: "王建国", [f2]: "刘敏" };
 
   // 职位：label 可自由命名，template 决定权限（sales=业务员权限，follower=下厂员权限）
-  setSetting("roles", [
-    { k: "sales", label: "业务员", template: "sales", core: true },
-    { k: "follower", label: "下厂员", template: "follower", core: true }
-  ]);
+  setSetting("roles", DEFAULT_ROLES);
   setSetting("factories", {
     emb: ["锦绣绣花厂", "华艺印花厂", "美达绣印"],
     prod: ["宏发制衣厂", "联诚服装厂", "永盛制衣"],
@@ -184,4 +198,4 @@ function seedIfEmpty() {
   console.log("[db] 已填充演示数据（管理员 13800000000 / 密码 123456）");
 }
 
-module.exports = { db, uid, getSetting, setSetting, seedIfEmpty, DATA_DIR, UPLOAD_DIR };
+module.exports = { db, uid, getSetting, setSetting, seedIfEmpty, ensureDefaults, DATA_DIR, UPLOAD_DIR };
