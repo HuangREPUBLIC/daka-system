@@ -29,6 +29,11 @@ function fmtT(t) {
   const y = d.getFullYear() === new Date().getFullYear() ? "" : d.getFullYear() + "年";
   return `${y}${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
+// 今天，按本地时区取（toISOString 是 UTC，中国上午 8 点前会算成前一天）
+function todayStr() {
+  const d = new Date(), p = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
 // 日期字符串 2026-08-15 -> 2026年8月15日
 function fmtDate(v) {
   if (!v) return "";
@@ -264,7 +269,6 @@ function vLogin() {
     <div class="login-brand">
       <div class="login-logo">${APP_LOGO}</div>
       <h1 class="login-title">跟单打卡系统</h1>
-      <p class="login-sub">服装生产进度 · 现场打卡 · 实时同步</p>
     </div>
     <div class="login-card">
       <label class="lg-field"><span>手机号</span>
@@ -321,16 +325,18 @@ function vOrders() {
 /* ---------- 新建订单 / 批量导入 ---------- */
 function vNew() {
   const scalars = s => state.fields[s].filter(f => f.type !== "log");
+  // 新建时日期默认当天，业务员默认自己
+  const defVal = f => f.type === "date" ? todayStr()
+    : (f.k === "sales" && me().template === "sales" ? me().id : "");
   return `<section class="group">
     <div class="group-title">订单明细</div>
     <div class="card">
       <label class="field"><span>订单季节</span>${seasonSelectHtml("")}</label>
-      <div class="grid2">${scalars("order").map(f =>
-        fieldRow(f, f.k === "sales" && me().template === "sales" ? me().id : "")).join("")}</div>
+      <div class="grid2">${scalars("order").map(f => fieldRow(f, defVal(f))).join("")}</div>
     </div></section>
   <section class="group">
     <div class="group-title">生产安排（指定负责打卡的下厂员）</div>
-    <div class="card"><div class="grid2">${scalars("production").map(f => fieldRow(f, "")).join("")}</div></div>
+    <div class="card"><div class="grid2">${scalars("production").map(f => fieldRow(f, defVal(f))).join("")}</div></div>
     <div class="btn-row" style="padding-left:0;padding-right:0">
       <button class="btn block" onclick="A.createOrder()">保存订单</button></div>
   </section>
@@ -436,7 +442,7 @@ function vDetail() {
     <div class="group-title">三、验货问题<button class="btn plain right" onclick="A.toggleAdd('insp')">＋ 新增</button></div>
     <div class="card">
       <div class="addbox" id="add-insp">
-        <label class="field"><span>验货日期</span>${dateFieldHtml("insp-date", new Date().toISOString().slice(0, 10))}</label>
+        <label class="field"><span>验货日期</span>${dateFieldHtml("insp-date", todayStr())}</label>
         <div id="insp-items"><div class="grid2 insp-row">
           <label class="field"><span>发现问题</span><textarea class="in insp-p" style="min-height:62px"></textarea></label>
           <label class="field"><span>整改情况</span><textarea class="in insp-f" style="min-height:62px"></textarea></label></div></div>
@@ -523,7 +529,7 @@ function messagesHtml() {
 function vChat() {
   if (!state.chat.activeId) {
     return `<section class="group">
-      <div class="group-title">同事 · 一对一私聊，只有你们两人能看到</div>
+      <div class="group-title">同事</div>
       <div class="card" id="chat-contacts">${contactsHtml()}</div></section>`;
   }
   const a = state.chat.att;
@@ -559,7 +565,7 @@ function vAdmin() {
     : `<select class="in" style="width:auto;min-height:34px;padding:4px 30px 4px 10px;font-size:14px" onchange="A.changeRole('${u.id}',this.value)">
         ${state.roles.map(r => `<option value="${esc(r.k)}" ${u.role === r.k ? "selected" : ""}>${esc(r.label)}</option>`).join("")}</select>`;
   return `<section class="group">
-    <div class="group-title">员工账号 · 职位可直接下拉修改（自己的除外）</div>
+    <div class="group-title">员工账号</div>
     <div class="card"><div class="tbl-wrap"><table class="tbl">
       <tr><th>姓名</th><th>手机号</th><th>职位</th><th>操作</th></tr>
       ${state.users.map(u => `<tr>
@@ -569,7 +575,6 @@ function vAdmin() {
           u.role === "admin" ? "" : ` <button class="btn mini ghost" onclick="A.resetUserPw('${u.id}')">重置密码</button>
           <button class="btn mini danger ghost" onclick="A.deleteUser('${u.id}')">删除</button>`}</td></tr>`).join("")}
     </table></div></div>
-    <div class="group-note">员工离职请用「删除」（需二次确认）。删除后账号无法登录，历史打卡记录仍保留，手机号可重新用于新账号。</div>
   </section>
 
   <section class="group">
@@ -594,7 +599,6 @@ function vAdmin() {
         <option value="sales">业务员权限（可建单、改自己录入的订单）</option>
         <option value="follower">下厂员权限（只能给自己负责的订单打卡）</option></select></label>
       <div class="btn-row"><button class="btn" onclick="A.addRole()">添加职位</button></div></div>
-    <div class="group-note">除内置的业务员、下厂员，可自定义职位（如「跟单主管」）。新职位要选一套权限模板，避免权限真空；还有人担任的职位不能删除。</div>
   </section>
 
   <section class="group">
@@ -692,7 +696,6 @@ const A = {
   openForgotPw() {
     modal({
       title: "忘记密码 / 修改密码", okText: "确认修改",
-      body: "输入手机号和新密码即可重置（公司内部系统，不需要短信验证码）。",
       html: `<label class="field" style="border:0;padding:0 0 10px"><span>手机号</span><input class="in" id="fp-phone" inputmode="tel"></label>
         <label class="field" style="border:0;padding:0 0 10px"><span>新密码</span><input class="in" id="fp-p1" type="password"></label>
         <label class="field" style="border:0;padding:0"><span>确认新密码</span><input class="in" id="fp-p2" type="password"></label>`,
@@ -960,7 +963,7 @@ const A = {
       if (!r.ok) throw await r.json().catch(() => ({ error: "导出失败" }));
       const blob = await r.blob(), url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = `订单导出-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.href = url; a.download = `订单导出-${todayStr()}.xlsx`;
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
       toast("已开始下载");
     } catch (e) { toast((e && e.error) || "导出失败"); }

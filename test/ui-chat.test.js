@@ -83,7 +83,7 @@ async function apiAs(phone, method, p, body) {
 
   // ---- 聊天 ----
   window.go("chat"); await sleep(600);
-  ok(app().includes("一对一私聊"), "聊天页渲染");
+  ok(app().includes('data-view="chat"') && app().includes("同事"), "聊天页渲染");
   ok(st().chat.contacts.length === st().users.length - 1, "联系人=其他同事");
   ok(!st().chat.contacts.some(c => c.id === st().me.id), "联系人不含自己");
   await A.openChat(chen.id); await sleep(500);
@@ -122,13 +122,21 @@ async function apiAs(phone, method, p, body) {
   ok(/\d{1,2}月\d{1,2}日 \d{2}:\d{2}/.test(app()), "打卡时间是中文月日");
 
   window.go("new"); await sleep(500);
-  ok(doc.getElementById("nf-deadline--label").textContent.includes("选择日期"), "日期控件显示中文");
+  const d = new Date(), pad = n => String(n).padStart(2, "0");
+  const todayCn = `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+  const todayIso = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  ok(doc.getElementById("nf-deadline--label").textContent === todayCn, "新建订单日期默认当天且显示中文");
+  ok(doc.getElementById("nf-deadline").value === todayIso, "底层日期值就是本地当天（不受 UTC 时差影响）");
+  ok(doc.getElementById("nf-shipDate--label").textContent === todayCn, "发货日期同样默认当天");
   ok(doc.getElementById("nf-img--name").textContent.includes("未选择文件"), "文件控件显示中文");
   ok(!/Choose File|No file chosen/i.test(app()), "没有英文文件选择文案");
   ok(doc.getElementById("nf-deadline").type === "date", "底层仍是原生日期控件（手机可调系统日期轮）");
 
   window.go("account"); await sleep(600);
   ok(!app().includes("不点退出的话"), "已移除登录状态说明文字");
+  ok(!app().includes("服装生产进度") && !app().includes("一对一私聊")
+     && !app().includes("职位可直接下拉修改") && !app().includes("员工离职请用")
+     && !app().includes("除内置的业务员"), "多余的说明文案已全部移除");
 
   A.forceLogout(); await sleep(200);
   ok(app().includes("<svg") && app().includes("login-logo"), "登录页使用 SVG 应用图标");

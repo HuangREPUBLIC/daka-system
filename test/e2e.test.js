@@ -59,7 +59,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   // 管理后台：职位下拉
   window.go("admin"); await sleep(250);
-  ok(app().includes("职位可直接下拉修改"), "管理后台渲染");
+  ok(app().includes("员工账号") && app().includes("职位管理"), "管理后台渲染");
   ok(app().includes('data-view="admin"'), "当前页面是管理后台");
   const selCount = (app().match(/A\.changeRole\(/g) || []).length;
   const admins = st().users.filter(u => u.role === "admin").length;
