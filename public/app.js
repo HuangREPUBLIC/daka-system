@@ -343,8 +343,8 @@ function vNew() {
   <section class="group">
     <div class="group-title">表格批量导入</div>
     <div class="card"><div class="card-pad">
-      <p style="font-size:13.5px;color:var(--ink-2);margin:0 0 12px">把 Excel 另存为 CSV 后上传，或直接粘贴表格内容。第一行为表头，按“货号、款式名、款式、数量、款式描述、订单交期、面料、业务员、下厂员、季节”等列名识别。识别后会<b>填入下方表单</b>，可逐项修改，确认后再导入。</p>
-      <div style="margin-bottom:10px">${fileFieldHtml("imp-file", ".csv,.txt", "A.importFile(this)", "选择 CSV 文件")}</div>
+      <p style="font-size:13.5px;color:var(--ink-2);margin:0 0 12px">支持 <b>Excel(.xlsx/.xls)</b> 和 <b>CSV(.csv/.txt)</b>，也可以把表格内容直接复制粘贴到下面。第一行为表头，按“货号、款式名、款式、数量、款式描述、订单交期、面料、业务员、下厂员、季节”等列名识别。识别后会<b>填入下方表单</b>，可逐项修改，确认后再导入。</p>
+      <div style="margin-bottom:10px">${fileFieldHtml("imp-file", ".xlsx,.xls,.csv,.txt", "A.importFile(this)", "选择表格文件")}</div>
       <textarea class="in" id="imp-text" placeholder="或将 Excel 中选中的区域直接粘贴到这里（含表头）">${esc(importRaw)}</textarea>
       <div style="margin-top:10px"><button class="btn ghost" onclick="A.importText()">识别数据</button></div>
     </div>${importPreview ? importPreviewHtml() : ""}</div>
@@ -970,12 +970,53 @@ const A = {
   },
 
   /* ---- 批量导入 ---- */
-  importFile(input) {
+  async importFile(input) {
     const f = input.files && input.files[0]; if (!f) return;
     A.syncFileName(input.id, f.name);
-    const rd = new FileReader();
-    rd.onload = () => { importRaw = rd.result; render(); A.importText(); };
-    rd.readAsText(f, "utf-8");
+    const fd = new FormData(); fd.append("file", f);
+    toast("正在解析文件…");
+    try {
+      const r = await fetch("/api/import/parse", {
+        method: "POST", headers: { Authorization: "Bearer " + state.token }, body: fd });
+      const j = await r.json(); if (!r.ok) throw j;
+      importRaw = "";
+      A.showPreview(A.rowsToPreview(j.rows), j.encoding === "GBK" ? "（已按 GBK 编码读取）" : "");
+    } catch (e) { toast((e && e.error) || "文件解析失败"); }
+  },
+  // 表头列名 -> 字段
+  importMap() {
+    return { "货号": "styleNo", "款式名": "styleName", "款式": "style", "数量": "qty", "款式描述": "desc",
+      "订单交期": "deadline", "交期": "deadline", "面料": "fabric", "业务员": "sales", "下厂员": "follower",
+      "季节": "_season", "订单季节": "_season", "绣印工厂": "embFactory", "生产厂": "factory" };
+  },
+  // 二维数组（首行表头）-> 待确认的订单列表
+  rowsToPreview(grid) {
+    const MAP = A.importMap();
+    const heads = (grid[0] || []).map(h => String(h == null ? "" : h).trim().replace(/^\uFEFF/, ""));
+    const out = [];
+    for (let i = 1; i < grid.length; i++) {
+      const cells = grid[i] || [];
+      if (!cells.some(c => String(c == null ? "" : c).trim())) continue;
+      const values = {}; let season = "";
+      heads.forEach((h, j) => {
+        const key = MAP[h], v = String(cells[j] == null ? "" : cells[j]).trim();
+        if (!v || !key) return;
+        if (key === "_season") season = v;
+        else if (key === "sales" || key === "follower") {
+          const u = state.users.find(x => x.name === v);
+          if (u) values[key] = u.id;
+        } else values[key] = v;
+      });
+      if (!values.styleNo && !values.styleName) continue;
+      if (me().template === "sales" && !values.sales) values.sales = me().id;
+      out.push({ season: season || "", values });
+    }
+    return out;
+  },
+  showPreview(rows, extra) {
+    if (!rows.length) return toast("未识别到有效数据，请检查表头列名");
+    importPreview = rows; render();
+    toast(`识别到 ${rows.length} 单${extra || ""}，已填入下方表单，可修改后确认导入`);
   },
   importText() {
     const raw = ($("imp-text").value || "").trim();
@@ -996,29 +1037,7 @@ const A = {
       }
       out.push(cur); return out;
     };
-    const heads = split(lines[0]).map(h => h.trim().replace(/^﻿/, ""));
-    const MAP = { "货号": "styleNo", "款式名": "styleName", "款式": "style", "数量": "qty", "款式描述": "desc",
-      "订单交期": "deadline", "交期": "deadline", "面料": "fabric", "业务员": "sales", "下厂员": "follower",
-      "季节": "_season", "订单季节": "_season", "绣印工厂": "embFactory", "生产厂": "factory" };
-    const rows = [];
-    for (let i = 1; i < lines.length; i++) {
-      const cells = split(lines[i]); if (!cells.some(c => c && c.trim())) continue;
-      const values = {}; let season = "";
-      heads.forEach((h, j) => {
-        const key = MAP[h], v = (cells[j] || "").trim(); if (!v) return;
-        if (key === "_season") season = v;
-        else if (key === "sales" || key === "follower") {
-          const u = state.users.find(x => x.name === v);
-          if (u) values[key] = u.id;
-        } else if (key) values[key] = v;
-      });
-      if (!values.styleNo && !values.styleName) continue;
-      if (me().template === "sales" && !values.sales) values.sales = me().id;
-      rows.push({ season: season || "", values });
-    }
-    if (!rows.length) return toast("未识别到有效数据，请检查表头列名");
-    importPreview = rows; render();
-    toast(`识别到 ${rows.length} 单，已填入下方表单，可修改后确认导入`);
+    A.showPreview(A.rowsToPreview(lines.map(split)));
   },
   syncImportInputs() {
     if (!importPreview) return;

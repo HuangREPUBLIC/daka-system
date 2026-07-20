@@ -75,6 +75,37 @@ async function call(m,p,t,b){const h={"Content-Type":"application/json"};if(t)h.
   const dl = await fetch(BASE.replace("/api", "") + up.j.url);
   ok(dl.status === 200, "附件可以下载");
 
+  // ---- 导入：直接读 Excel / GBK 编码的 CSV ----
+  const XLSX = require("xlsx");
+  async function parseUpload(token, filename, buf, type) {
+    const fd = new FormData();
+    fd.append("file", new Blob([buf], { type }), filename);
+    const r = await fetch(BASE + "/import/parse", { method: "POST", headers: { Authorization: "Bearer " + token }, body: fd });
+    return { status: r.status, j: await r.json().catch(() => null) };
+  }
+  // 真的 .xlsx
+  const ws = XLSX.utils.aoa_to_sheet([["季节", "货号", "款式名", "数量"], ["SS2027", "XL-1", "表格导入款", "600"]]);
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "订单");
+  const xbuf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+  const xr = await parseUpload(aT, "订单表.xlsx", xbuf, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  ok(xr.status === 200 && xr.j.rows.length === 2 && xr.j.rows[1][1] === "XL-1", "可直接解析 .xlsx（不用另存为 CSV）");
+  ok(xr.j.rows[0][0] === "季节", "xlsx 中文表头正确");
+
+  // Windows 版 Excel 存的 GBK 编码 CSV
+  const gbkCsv = Buffer.concat([
+    Buffer.from([0xBC,0xBE,0xBD,0xDA,0x2C,0xBB,0xF5,0xBA,0xC5,0x0A]),      // 季节,货号\n
+    Buffer.from("SS2027,GB-1\n", "latin1")
+  ]);
+  const gr = await parseUpload(aT, "订单.csv", gbkCsv, "text/csv");
+  ok(gr.status === 200 && gr.j.encoding === "GBK", "GBK 编码的 CSV 被识别");
+  ok(gr.j.rows[0][0] === "季节" && gr.j.rows[0][1] === "货号", "GBK 中文表头不乱码");
+
+  // UTF-8 CSV 仍正常
+  const ur = await parseUpload(aT, "u.csv", Buffer.from("季节,货号\nSS2027,U-1\n", "utf8"), "text/csv");
+  ok(ur.status === 200 && ur.j.rows[0][0] === "季节" && ur.j.encoding === "UTF-8", "UTF-8 编码的 CSV 正常");
+
+  ok((await parseUpload(aT, "x.pdf", Buffer.from("%PDF"), "application/pdf")).status === 400, "不支持的格式被拒绝");
+
   // 员工打卡记录
   ok((await call("GET","/users/"+chen.id+"/logs",aT)).status===200,"管理员可查员工打卡");
   ok((await call("GET","/users/"+chen.id+"/logs",fT)).status===403,"他人不可查别人打卡");

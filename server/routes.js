@@ -526,6 +526,45 @@ router.post("/chat/upload", chatUpload.single("file"), (req, res) => {
   });
 });
 
+/* ---------- 导入：解析上传的 Excel / CSV ----------
+ * 直接支持 .xlsx/.xls，不用再另存为 CSV；
+ * CSV 先按 UTF-8 解，出现乱码字符时自动改用 GBK
+ *（Windows 版 Excel「另存为 CSV」默认就是 GBK，不处理会中文全乱码）。
+ */
+const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const IMPORT_EXT = [".xlsx", ".xls", ".csv", ".txt"];
+
+router.post("/import/parse", memUpload.single("file"), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "请选择文件" });
+  const ext = path.extname(req.file.originalname || "").toLowerCase();
+  if (!IMPORT_EXT.includes(ext))
+    return res.status(400).json({ error: "只支持 Excel(.xlsx/.xls) 和 CSV(.csv/.txt) 文件" });
+
+  let wb, encoding = "UTF-8";
+  try {
+    if (ext === ".xlsx" || ext === ".xls") {
+      wb = XLSX.read(req.file.buffer, { type: "buffer", cellDates: true, dateNF: "yyyy-mm-dd" });
+      encoding = "Excel";
+    } else {
+      let text = new TextDecoder("utf-8").decode(req.file.buffer);
+      if (text.includes("\uFFFD")) {                       // 有乱码字符 -> 多半是 GBK
+        try { text = new TextDecoder("gbk").decode(req.file.buffer); encoding = "GBK"; } catch (e) { }
+      }
+      wb = XLSX.read(text, { type: "string", cellDates: true, dateNF: "yyyy-mm-dd" });
+    }
+  } catch (e) {
+    return res.status(400).json({ error: "文件解析失败，请确认是有效的 Excel 或 CSV" });
+  }
+
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  if (!ws) return res.status(400).json({ error: "表格里没有内容" });
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" })
+    .map(r => r.map(c => (c == null ? "" : String(c).trim())))
+    .filter(r => r.some(c => c !== ""));
+  if (rows.length < 2) return res.status(400).json({ error: "至少需要表头和一行数据" });
+  res.json({ rows, sheet: wb.SheetNames[0], encoding });
+});
+
 /* ---------- 导出 Excel（管理员）---------- */
 router.get("/export", A.adminRequired, (req, res) => {
   const fields = getSetting("fields", { order: [], production: [] });
