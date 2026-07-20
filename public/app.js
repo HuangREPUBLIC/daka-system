@@ -23,10 +23,18 @@ let modalState = null;
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c =>
   ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// 时间：今年省略年份 ——「7月20日 17:51」；跨年「2025年7月20日 17:51」
 function fmtT(t) {
   const d = new Date(t), p = n => String(n).padStart(2, "0");
-  const y = d.getFullYear() === new Date().getFullYear() ? "" : d.getFullYear() + "-";
-  return `${y}${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  const y = d.getFullYear() === new Date().getFullYear() ? "" : d.getFullYear() + "年";
+  return `${y}${d.getMonth() + 1}月${d.getDate()}日 ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+// 日期字符串 2026-08-15 -> 2026年8月15日
+function fmtDate(v) {
+  if (!v) return "";
+  const m = String(v).match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (!m) return v;
+  return `${m[1]}年${+m[2]}月${+m[3]}日`;
 }
 function fmtSize(n) {
   if (!n && n !== 0) return "";
@@ -45,6 +53,23 @@ const isAdmin = () => me() && me().template === "admin";
 const canCreateOrder = () => me() && (me().template === "admin" || me().template === "sales");
 const roleLabelOf = u => (u ? (u.roleLabel || (u.role === "admin" ? "管理员" : u.role)) : "");
 const labelForRoleKey = k => k === "admin" ? "管理员" : ((state.roles.find(r => r.k === k) || {}).label || k);
+const APP_LOGO = `
+  <svg viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs>
+      <linearGradient id="lg-bg" x1="60" y1="30" x2="440" y2="490" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#4C97DC"/><stop offset=".55" stop-color="#1E63AE"/><stop offset="1" stop-color="#10386C"/>
+      </linearGradient>
+      <linearGradient id="lg-gloss" x1="90" y1="60" x2="300" y2="300" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#FFFFFF" stop-opacity=".26"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <rect width="512" height="512" rx="116" fill="url(#lg-bg)"/>
+    <path d="M116 0h280a116 116 0 0 1 116 116v70C420 96 300 40 176 40 152 40 128 42 106 46A116 116 0 0 1 116 0Z" fill="url(#lg-gloss)"/>
+    <path d="M108 274 L206 372 L344 150" stroke="#FFFFFF" stroke-width="42" stroke-linecap="round"
+          stroke-linejoin="round" stroke-dasharray="66 46" opacity=".97"/>
+    <path d="M336 164 L424 76" stroke="#FFFFFF" stroke-width="24" stroke-linecap="round"/>
+    <ellipse cx="434" cy="66" rx="27" ry="17" transform="rotate(-45 434 66)" fill="none" stroke="#FFFFFF" stroke-width="15"/>
+  </svg>`;
 
 /* ================= API ================= */
 async function api(method, path, body) {
@@ -96,6 +121,7 @@ function displayVal(o, f) {
   const v = (o.values || {})[f.k];
   if (v == null || v === "") return "";
   if (f.type === "user-sales" || f.type === "user-follower") return uname(v) || v;
+  if (f.type === "date") return fmtDate(v);
   return v;
 }
 function fieldInput(f, val, prefix) {
@@ -104,13 +130,30 @@ function fieldInput(f, val, prefix) {
   if (opts) return `<select class="in" id="${id}"><option value="">请选择</option>${opts.map(([v, t]) =>
     `<option value="${esc(v)}" ${v === val ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>`;
   if (f.type === "textarea") return `<textarea class="in" id="${id}">${esc(val || "")}</textarea>`;
-  if (f.type === "date") return `<input class="in" type="date" id="${id}" value="${esc(val || "")}">`;
+  if (f.type === "date") return dateFieldHtml(id, val);
   if (f.type === "number") return `<input class="in" type="number" id="${id}" value="${esc(val || "")}">`;
-  if (f.type === "image") return `<input class="in" type="file" accept="image/*" id="${id}" onchange="A.pickImg(this,'${f.k}')">${
-    val ? `<img src="${esc(val)}" alt="款式图" style="max-width:120px;margin-top:8px;border-radius:10px">` : ""}`;
+  if (f.type === "image") return fileFieldHtml(id, "image/*", `A.pickImg(this,'${f.k}')`, "选择图片") +
+    (val ? `<img src="${esc(val)}" alt="款式图" style="max-width:120px;margin-top:8px;border-radius:10px">` : "");
   return `<input class="in" id="${id}" value="${esc(val || "")}">`;
 }
 const fieldRow = (f, val, prefix) => `<label class="field"><span>${esc(f.label)}</span>${fieldInput(f, val, prefix)}</label>`;
+
+// 日期：真正的 input[type=date] 藏在下面（手机上仍调起系统日期轮），
+// 上面盖一个显示「2026年8月15日」的中文按钮
+function dateFieldHtml(id, val) {
+  return `<div class="datefield">
+    <input type="date" id="${id}" class="date-native" value="${esc(val || "")}" onchange="A.syncDateLabel('${id}')">
+    <button type="button" class="in date-btn ${val ? "" : "empty"}" id="${id}--label"
+      onclick="A.openDate('${id}')">${val ? esc(fmtDate(val)) : "选择日期"}</button></div>`;
+}
+// 文件选择：隐藏原生控件（它显示英文 Choose File），用中文按钮代替
+function fileFieldHtml(id, accept, onchange, pickText) {
+  return `<div class="filefield">
+    <input type="file" id="${id}" class="file-native" accept="${accept}" onchange="${onchange}">
+    <button type="button" class="in file-btn" onclick="document.getElementById('${id}').click()">
+      <span class="file-name" id="${id}--name">未选择文件</span>
+      <span class="file-pick">${esc(pickText || "选择文件")}</span></button></div>`;
+}
 
 function chinaYear() {
   try { return +new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Shanghai", year: "numeric" }).format(new Date()); }
@@ -217,21 +260,22 @@ function render() {
 
 /* ---------- 登录 ---------- */
 function vLogin() {
-  return `<div class="login-wrap">
-    <div class="login-logo">🧵</div>
-    <h1 class="login-title">跟单打卡系统</h1>
-    <p class="login-sub">服装生产进度 · 现场打卡 · 实时同步</p>
+  return `<div class="login-page"><div class="login-inner">
+    <div class="login-brand">
+      <div class="login-logo">${APP_LOGO}</div>
+      <h1 class="login-title">跟单打卡系统</h1>
+      <p class="login-sub">服装生产进度 · 现场打卡 · 实时同步</p>
+    </div>
     <div class="login-card">
-      <label class="field"><span>手机号</span>
-        <input class="in" id="lg-phone" inputmode="tel" autocomplete="username" placeholder="请输入手机号"></label>
-      <label class="field"><span>密码</span>
-        <input class="in" id="lg-pass" type="password" autocomplete="current-password" placeholder="请输入密码"
+      <label class="lg-field"><span>手机号</span>
+        <input id="lg-phone" inputmode="tel" autocomplete="username" placeholder="请输入手机号"></label>
+      <label class="lg-field"><span>密码</span>
+        <input id="lg-pass" type="password" autocomplete="current-password" placeholder="请输入密码"
           onkeydown="if(event.key==='Enter')A.login()"></label>
     </div>
-    <button class="btn block" onclick="A.login()">登 录</button>
-    <div style="text-align:center;margin-top:14px">
-      <button class="btn plain" onclick="A.openForgotPw()">忘记密码 / 修改密码</button></div>
-  </div>`;
+    <button class="btn block login-btn" onclick="A.login()">登 录</button>
+    <div class="login-foot"><button class="btn plain" onclick="A.openForgotPw()">忘记密码 / 修改密码</button></div>
+  </div></div>`;
 }
 
 /* ---------- 订单列表 ---------- */
@@ -267,7 +311,7 @@ function vOrders() {
         <div class="o-main">
           <div class="o-title"><span class="tag">${esc(o.season)}</span>${esc(o.values.styleNo || "")} ${esc(o.values.styleName || "")}</div>
           <div class="o-meta"><span>业务员 ${esc(uname(o.values.sales)) || "—"}</span><span>下厂员 ${esc(uname(o.values.follower)) || "未指定"}</span>
-            <span class="num">数量 ${esc(o.values.qty || "-")}</span><span class="num">交期 ${esc(o.values.deadline || "-")}</span></div>
+            <span class="num">数量 ${esc(o.values.qty || "-")}</span><span>交期 ${esc(fmtDate(o.values.deadline)) || "-"}</span></div>
           ${latest ? `<div class="o-latest">最新：${esc(latest.fieldLabel)} · ${esc(latest.text)} <span class="num">(${fmtT(latest.t)})</span></div>` : ""}
         </div><span class="chev">›</span></div>`;
     }).join("") || `<div class="empty">${state.orders.length ? "没有符合条件的订单" : "还没有订单，点右上角 ＋ 新建"}</div>`}</div>
@@ -294,7 +338,7 @@ function vNew() {
     <div class="group-title">表格批量导入</div>
     <div class="card"><div class="card-pad">
       <p style="font-size:13.5px;color:var(--ink-2);margin:0 0 12px">把 Excel 另存为 CSV 后上传，或直接粘贴表格内容。第一行为表头，按“货号、款式名、款式、数量、款式描述、订单交期、面料、业务员、下厂员、季节”等列名识别。识别后会<b>填入下方表单</b>，可逐项修改，确认后再导入。</p>
-      <input class="in" type="file" accept=".csv,.txt" onchange="A.importFile(this)" style="margin-bottom:10px">
+      <div style="margin-bottom:10px">${fileFieldHtml("imp-file", ".csv,.txt", "A.importFile(this)", "选择 CSV 文件")}</div>
       <textarea class="in" id="imp-text" placeholder="或将 Excel 中选中的区域直接粘贴到这里（含表头）">${esc(importRaw)}</textarea>
       <div style="margin-top:10px"><button class="btn ghost" onclick="A.importText()">识别数据</button></div>
     </div>${importPreview ? importPreviewHtml() : ""}</div>
@@ -392,14 +436,14 @@ function vDetail() {
     <div class="group-title">三、验货问题<button class="btn plain right" onclick="A.toggleAdd('insp')">＋ 新增</button></div>
     <div class="card">
       <div class="addbox" id="add-insp">
-        <label class="field"><span>验货日期</span><input class="in" type="date" id="insp-date" value="${new Date().toISOString().slice(0, 10)}"></label>
+        <label class="field"><span>验货日期</span>${dateFieldHtml("insp-date", new Date().toISOString().slice(0, 10))}</label>
         <div id="insp-items"><div class="grid2 insp-row">
           <label class="field"><span>发现问题</span><textarea class="in insp-p" style="min-height:62px"></textarea></label>
           <label class="field"><span>整改情况</span><textarea class="in insp-f" style="min-height:62px"></textarea></label></div></div>
         <div class="btn-row"><button class="btn mini ghost" onclick="A.inspAddRow()">＋ 再加一条</button>
           <button class="btn mini" onclick="A.saveInsp('${o.id}')">保存验货记录</button></div></div>
       ${o.inspections.length ? o.inspections.slice().sort((a, b) => (b.date < a.date ? -1 : 1)).map(g => `<div class="insp-day">
-        <div class="lf-head"><span class="d num">${esc(g.date)}</span>
+        <div class="lf-head"><span class="d">${esc(fmtDate(g.date))}</span>
           <span style="font-size:12.5px;color:var(--ink-2);font-weight:400">${esc(g.byName)} · <span class="num">${fmtT(g.t)}</span></span>
           ${(isAdmin() || g.by === me().id) ? `<button class="btn plain right" style="color:var(--bad)" onclick="A.delInsp('${o.id}','${g.id}')">删除</button>` : ""}</div>
         ${g.items.map(it => `<div class="insp-item"><div><span class="lbl p">发现问题</span>${esc(it.problem)}</div>
@@ -458,9 +502,10 @@ function attachmentHtml(a, mine) {
 // 时间只在间隔超过 5 分钟时单独显示一行，不再每条气泡都挂时间
 function chatTimeLabel(t) {
   const d = new Date(t), n = new Date(), p = x => String(x).padStart(2, "0");
-  const sameDay = d.toDateString() === n.toDateString();
   const hm = `${p(d.getHours())}:${p(d.getMinutes())}`;
-  return sameDay ? hm : `${p(d.getMonth() + 1)}-${p(d.getDate())} ${hm}`;
+  if (d.toDateString() === n.toDateString()) return hm;
+  const y = d.getFullYear() === n.getFullYear() ? "" : d.getFullYear() + "年";
+  return `${y}${d.getMonth() + 1}月${d.getDate()}日 ${hm}`;
 }
 function messagesHtml() {
   const ms = state.chat.messages;
@@ -614,7 +659,6 @@ function vAccount() {
   <section class="group">
     <div class="btn-row" style="padding-left:0;padding-right:0">
       <button class="btn danger ghost block" onclick="A.logout()">退出登录</button></div>
-    <div class="group-note" style="text-align:center">不点退出的话，登录状态会一直保持</div>
   </section>`;
 }
 
@@ -671,6 +715,20 @@ const A = {
     catch (e) { toast((e && e.error) || "修改失败"); }
   },
 
+  openDate(id) {
+    const el = $(id); if (!el) return;
+    try { if (el.showPicker) return el.showPicker(); } catch (e) { }
+    el.focus(); el.click();
+  },
+  syncDateLabel(id) {
+    const el = $(id), lab = $(id + "--label"); if (!el || !lab) return;
+    lab.textContent = el.value ? fmtDate(el.value) : "选择日期";
+    lab.classList.toggle("empty", !el.value);
+  },
+  syncFileName(id, name) {
+    const el = $(id + "--name"); if (el) el.textContent = name || "未选择文件";
+  },
+
   setF(k, v) { filt[k] = v; render(); },
   setFKw(v) {
     filt.kw = v; clearTimeout(A._kwT);
@@ -683,6 +741,7 @@ const A = {
 
   async pickImg(input, key) {
     const file = input.files && input.files[0]; if (!file) return;
+    A.syncFileName(input.id, file.name);
     const fd = new FormData(); fd.append("image", file);
     try {
       const r = await fetch("/api/upload", { method: "POST", headers: { Authorization: "Bearer " + state.token }, body: fd });
@@ -910,6 +969,7 @@ const A = {
   /* ---- 批量导入 ---- */
   importFile(input) {
     const f = input.files && input.files[0]; if (!f) return;
+    A.syncFileName(input.id, f.name);
     const rd = new FileReader();
     rd.onload = () => { importRaw = rd.result; render(); A.importText(); };
     rd.readAsText(f, "utf-8");

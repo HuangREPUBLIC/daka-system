@@ -111,6 +111,28 @@ async function apiAs(phone, method, p, body) {
   window.go("chat"); await sleep(500);
   ok(app().includes("badge") || st().unread.total >= 1, "未读显示红点");
 
+  // ---- 日期中文化 / 中文文件选择 / 登录页图标 ----
+  window.go("orders"); await sleep(400);
+  const listTxt = app();
+  ok(/\d{4}年\d{1,2}月\d{1,2}日/.test(listTxt), "订单列表交期是中文年月日");
+  ok(!/\d{4}-\d{2}-\d{2}/.test(listTxt), "列表不再出现 2026-08-15 格式");
+
+  const anyOrder = st().orders[0];
+  window.go("detail", anyOrder.id); await sleep(500);
+  ok(/\d{1,2}月\d{1,2}日 \d{2}:\d{2}/.test(app()), "打卡时间是中文月日");
+
+  window.go("new"); await sleep(500);
+  ok(doc.getElementById("nf-deadline--label").textContent.includes("选择日期"), "日期控件显示中文");
+  ok(doc.getElementById("nf-img--name").textContent.includes("未选择文件"), "文件控件显示中文");
+  ok(!/Choose File|No file chosen/i.test(app()), "没有英文文件选择文案");
+  ok(doc.getElementById("nf-deadline").type === "date", "底层仍是原生日期控件（手机可调系统日期轮）");
+
+  window.go("account"); await sleep(600);
+  ok(!app().includes("不点退出的话"), "已移除登录状态说明文字");
+
+  A.forceLogout(); await sleep(200);
+  ok(app().includes("<svg") && app().includes("login-logo"), "登录页使用 SVG 应用图标");
+
   console.log(`\n结果：PASS ${pass}, FAIL ${fail}`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error("ERROR", e); process.exit(1); });
