@@ -18,6 +18,11 @@ app.use("/uploads", express.static(UPLOAD_DIR, { maxAge: "7d" }));
 
 // 前端静态资源
 const PUBLIC = path.join(__dirname, "..", "public");
+// Service Worker 和 manifest 不能被缓存，否则前端更新推不下去
+app.get(["/sw.js", "/manifest.webmanifest"], (req, res, next) => {
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  next();
+});
 app.use(express.static(PUBLIC));
 // 单页应用兜底：非 /api、非 /uploads 的路径都回 index.html
 app.get(/^\/(?!api|uploads).*/, (req, res) => res.sendFile(path.join(PUBLIC, "index.html")));

@@ -1,0 +1,17 @@
+{
+  "name": "跟单打卡系统",
+  "short_name": "跟单打卡",
+  "description": "服装生产进度跟踪 · 现场打卡 · 实时同步",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F2F2F7",
+  "theme_color": "#123B6D",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
