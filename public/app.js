@@ -15,7 +15,7 @@ let state = {
   myLogs: null
 };
 let route = { v: "orders", id: null };
-let editingBasic = false, imgDraft = {}, importPreview = null, importRaw = "";
+let editingBasic = false, importPreview = null, importRaw = "";
 let filt = { season: "", sales: "", follower: "", kw: "" };
 let modalState = null;
 let deferredInstall = null;   // 安卓/桌面 Chrome 的原生安装事件
@@ -141,8 +141,7 @@ function fieldInput(f, val, prefix) {
   if (f.type === "textarea") return `<textarea class="in" id="${id}">${esc(val || "")}</textarea>`;
   if (f.type === "date") return dateFieldHtml(id, val);
   if (f.type === "number") return `<input class="in" type="number" id="${id}" value="${esc(val || "")}">`;
-  if (f.type === "image") return fileFieldHtml(id, "image/*", `A.pickImg(this,'${f.k}')`, "选择图片") +
-    (val ? `<img src="${esc(val)}" alt="款式图" style="max-width:120px;margin-top:8px;border-radius:10px">` : "");
+  if (f.type === "image") return photoPicker("img");
   return `<input class="in" id="${id}" value="${esc(val || "")}">`;
 }
 const fieldRow = (f, val, prefix) => `<label class="field"><span>${esc(f.label)}</span>${fieldInput(f, val, prefix)}</label>`;
@@ -200,9 +199,79 @@ function renderModal() {
   mask.classList.add("show");
 }
 
+/* ================= 照片：压缩 / 多图上传 / 选择器 / 大图查看 ================= */
+let photoDraft = {};          // { 上下文key: [url,...] } 表单里正在编辑的照片
+let lightbox = null;          // 大图查看器状态
+
+function normalizePhotos(v) {
+  if (Array.isArray(v)) return v.filter(x => typeof x === "string" && x);
+  if (typeof v === "string" && v) return [v];
+  return [];
+}
+// 上传前压缩：长边 ≤1600，JPEG 0.82，把手机几 MB 的照片压到几百 KB
+function compressImage(file) {
+  return new Promise((resolve) => {
+    if (!file || !/^image\//.test(file.type)) return resolve(null);
+    const rd = new FileReader();
+    rd.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const max = 1600, scale = Math.min(1, max / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
+        const c = document.createElement("canvas"); c.width = w; c.height = h;
+        c.getContext("2d").drawImage(img, 0, 0, w, h);
+        c.toBlob(b => resolve(b || file), "image/jpeg", 0.82);
+      };
+      img.onerror = () => resolve(file);
+      img.src = rd.result;
+    };
+    rd.onerror = () => resolve(file);
+    rd.readAsDataURL(file);
+  });
+}
+async function uploadOnePhoto(file) {
+  const blob = await compressImage(file);
+  if (!blob) return null;
+  const fd = new FormData(); fd.append("image", blob, "photo.jpg");
+  const r = await fetch("/api/upload", { method: "POST", headers: { Authorization: "Bearer " + state.token }, body: fd });
+  const j = await r.json(); if (!r.ok) throw j;
+  return j.url;
+}
+// 缩略图（editable 时带删除叉）
+function photoThumbs(urls, editable, ctx) {
+  return urls.map((u, i) => `<div class="ph-thumb">
+    <img src="${esc(u)}" data-gallery='${JSON.stringify(urls)}' data-i="${i}" onclick="A.lightboxFromEl(this)">
+    ${editable ? `<span class="ph-x" onclick="A.removeDraftPhoto('${ctx}',${i})">✕</span>` : ""}</div>`).join("");
+}
+function pickerInner(ctx) {
+  const list = photoDraft[ctx] || [];
+  return photoThumbs(list, true, ctx) +
+    `<label class="ph-add"><input type="file" accept="image/*" multiple style="display:none" onchange="A.addDraftPhotos('${ctx}',this)">
+      <span class="ph-plus">＋</span><span>加照片</span></label>`;
+}
+function photoPicker(ctx) { return `<div class="photos-grid" id="pe-${ctx}">${pickerInner(ctx)}</div>`; }
+function photoGallery(urls) {
+  urls = normalizePhotos(urls);
+  if (!urls.length) return "";
+  return `<div class="photos-grid ro">${photoThumbs(urls, false)}</div>`;
+}
+function renderLightbox() {
+  let el = document.getElementById("lightbox");
+  if (!lightbox) { if (el) el.remove(); return; }
+  if (!el) { el = document.createElement("div"); el.id = "lightbox"; el.className = "lightbox"; document.body.appendChild(el); }
+  const { photos, i } = lightbox;
+  el.innerHTML = `<div class="lb-bar"><span class="lb-count num">${i + 1} / ${photos.length}</span>
+      <button class="lb-close" onclick="A.closeLightbox()">✕</button></div>
+    <img class="lb-img" src="${esc(photos[i])}" alt="照片">
+    ${photos.length > 1 ? `<button class="lb-nav prev" onclick="event.stopPropagation();A.lbStep(-1)">‹</button>
+      <button class="lb-nav next" onclick="event.stopPropagation();A.lbStep(1)">›</button>` : ""}`;
+  el.onclick = (e) => { if (e.target === el || (e.target.classList && e.target.classList.contains("lb-img"))) A.closeLightbox(); };
+}
+
 /* ================= 路由 ================= */
 function go(v, id) {
   route = { v, id: id || null }; editingBasic = false;
+  photoDraft = {}; lightbox = null;
   if (v !== "chat") { state.chat.activeId = null; state.chat.messages = []; state.chat.draft = ""; state.chat.att = null; }
   render(); window.scrollTo(0, 0);
   if (v === "account") A.loadMyLogs(state.me.id);
@@ -316,7 +385,7 @@ function vOrders() {
     <div class="card">${list.map(o => {
       const latest = latestLog(o);
       return `<div class="ocard" onclick="go('detail','${o.id}')" role="button" tabindex="0" onkeydown="if(event.key==='Enter')go('detail','${o.id}')">
-        <div class="thumb">${o.values.img ? `<img src="${esc(o.values.img)}" alt="款式图">` : "款式图"}</div>
+        <div class="thumb">${(function(){const c=normalizePhotos(o.values.img)[0];return c?`<img src="${esc(c)}" alt="款式图">`:"款式图";})()}</div>
         <div class="o-main">
           <div class="o-title"><span class="tag">${esc(o.season)}</span>${esc(o.values.styleNo || "")} ${esc(o.values.styleName || "")}</div>
           <div class="o-meta"><span>业务员 ${esc(uname(o.values.sales)) || "—"}</span><span>下厂员 ${esc(uname(o.values.follower)) || "未指定"}</span>
@@ -330,6 +399,7 @@ function vOrders() {
 /* ---------- 新建订单 / 批量导入 ---------- */
 function vNew() {
   const scalars = s => state.fields[s].filter(f => f.type !== "log");
+  if (!photoDraft.img) photoDraft.img = [];
   // 新建时日期默认当天，业务员默认自己
   const defVal = f => f.type === "date" ? todayStr()
     : (f.k === "sales" && me().template === "sales" ? me().id : "");
@@ -384,21 +454,27 @@ function logFieldHtml(o, f, list, addKey, canAdd) {
       ${canAdd ? `<button class="btn mini right" onclick="A.toggleAdd('${addKey}')">＋ 打卡</button>` : ""}</div>
     ${canAdd ? `<div class="addbox" id="add-${addKey}">
       <textarea class="in" id="txt-${addKey}" placeholder="填写当前进度情况，可详细描述…"></textarea>
+      ${photoPicker("log:" + addKey)}
       <div style="margin-top:8px"><button class="btn mini" onclick="A.addLog('${o.id}','${addKey}')">提交打卡</button></div></div>` : ""}
     ${entries.length ? `<ul class="log">${entries.map(e => `<li>
       <div class="meta"><b>${esc(e.byName)}</b><span class="num">${fmtT(e.t)}</span>
         ${canTouchEntry(e) ? `<a href="javascript:void(0)" onclick="A.editLog('${o.id}','${addKey}','${e.id}')">改</a>
         <a href="javascript:void(0)" onclick="A.delLog('${o.id}','${addKey}','${e.id}')">删</a>` : ""}</div>
-      <div class="txt">${esc(e.text)}</div></li>`).join("")}</ul>` : `<div class="empty" style="padding:10px 0">暂无打卡记录</div>`}</div>`;
+      ${e.text ? `<div class="txt">${esc(e.text)}</div>` : ""}${photoGallery(e.photos)}</li>`).join("")}</ul>` : `<div class="empty" style="padding:10px 0">暂无打卡记录</div>`}</div>`;
 }
 function vDetail() {
   const o = state.orders.find(x => x.id === route.id);
   if (!o) return `<div class="card"><div class="empty">订单不存在</div></div>`;
   const scalars = s => state.fields[s].filter(f => f.type !== "log");
   const logsOf = s => state.fields[s].filter(f => f.type === "log");
-  const kv = fs => fs.map(f => `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
-    <div class="row-value">${f.type === "image" ? (o.values.img ? `<img src="${esc(o.values.img)}" alt="款式图" style="max-width:130px;border-radius:10px">` : "—")
-      : (esc(displayVal(o, f)) || "—")}</div></div>`).join("");
+  const kv = fs => fs.map(f => {
+    if (f.type === "image") {
+      const g = photoGallery(o.values.img);
+      return `<div class="row-item col"><div class="row-label">${esc(f.label)}</div>${g || `<div class="row-sub">暂无照片</div>`}</div>`;
+    }
+    return `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
+      <div class="row-value">${esc(displayVal(o, f)) || "—"}</div></div>`;
+  }).join("");
   const canB = canEditBasic(o), canOrdLog = canAddLog(o, "order"), canProdLog = canAddLog(o, "production");
   const editForm = s => `<div class="grid2">${scalars(s).map(f => fieldRow(f, o.values[f.k] || "")).join("")}</div>`;
 
@@ -432,12 +508,13 @@ function vDetail() {
               : `<span class="tag role">${esc(s.factory) || "未指定"}</span>`}
             ${canProdLog ? `<button class="btn mini right" onclick="A.toggleAdd('sub${i}')">＋ 打卡</button>` : ""}</div>
           ${canProdLog ? `<div class="addbox" id="add-sub${i}"><textarea class="in" id="txt-sub${i}" placeholder="该加工厂的进度情况…"></textarea>
+            ${photoPicker("log:sub" + i)}
             <div style="margin-top:8px"><button class="btn mini" onclick="A.addLog('${o.id}','sub${i}')">提交打卡</button></div></div>` : ""}
           ${s.log.length ? `<ul class="log">${s.log.slice().sort((a, b) => b.t - a.t).map(e => `<li>
             <div class="meta"><b>${esc(e.byName)}</b><span class="num">${fmtT(e.t)}</span>${canTouchEntry(e) ?
               `<a href="javascript:void(0)" onclick="A.editLog('${o.id}','sub${i}','${e.id}')">改</a>
                <a href="javascript:void(0)" onclick="A.delLog('${o.id}','sub${i}','${e.id}')">删</a>` : ""}</div>
-            <div class="txt">${esc(e.text)}</div></li>`).join("")}</ul>` : `<div class="empty" style="padding:8px 0">暂无打卡记录</div>`}</div>`).join("")}
+            ${e.text ? `<div class="txt">${esc(e.text)}</div>` : ""}${photoGallery(e.photos)}</li>`).join("")}</ul>` : `<div class="empty" style="padding:8px 0">暂无打卡记录</div>`}</div>`).join("")}
       </div>
       ${logsOf("production").filter(f => !["preSample", "cutting"].includes(f.k)).map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canProdLog)).join("")}
     </div>
@@ -451,6 +528,7 @@ function vDetail() {
         <div id="insp-items"><div class="grid2 insp-row">
           <label class="field"><span>发现问题</span><textarea class="in insp-p" style="min-height:62px"></textarea></label>
           <label class="field"><span>整改情况</span><textarea class="in insp-f" style="min-height:62px"></textarea></label></div></div>
+        <div class="field" style="border:0"><span>照片</span>${photoPicker("insp")}</div>
         <div class="btn-row"><button class="btn mini ghost" onclick="A.inspAddRow()">＋ 再加一条</button>
           <button class="btn mini" onclick="A.saveInsp('${o.id}')">保存验货记录</button></div></div>
       ${o.inspections.length ? o.inspections.slice().sort((a, b) => (b.date < a.date ? -1 : 1)).map(g => `<div class="insp-day">
@@ -458,7 +536,7 @@ function vDetail() {
           <span style="font-size:12.5px;color:var(--ink-2);font-weight:400">${esc(g.byName)} · <span class="num">${fmtT(g.t)}</span></span>
           ${(isAdmin() || g.by === me().id) ? `<button class="btn plain right" style="color:var(--bad)" onclick="A.delInsp('${o.id}','${g.id}')">删除</button>` : ""}</div>
         ${g.items.map(it => `<div class="insp-item"><div><span class="lbl p">发现问题</span>${esc(it.problem)}</div>
-          <div style="margin-top:4px"><span class="lbl f2">整改情况</span>${esc(it.fix) || "—"}</div></div>`).join("")}</div>`).join("")
+          <div style="margin-top:4px"><span class="lbl f2">整改情况</span>${esc(it.fix) || "—"}</div></div>`).join("")}${photoGallery(g.photos)}</div>`).join("")
         : `<div class="empty">暂无验货记录</div>`}</div>
   </section>
 
@@ -467,11 +545,12 @@ function vDetail() {
     <div class="card">
       <div class="addbox" id="add-follow" style="padding:12px 16px">
         <textarea class="in" id="txt-follow" placeholder="填写跟单过程中的问题、沟通事项…"></textarea>
+        ${photoPicker("follow")}
         <div style="margin-top:8px"><button class="btn mini" onclick="A.addFollow('${o.id}')">提交</button></div></div>
       ${o.followIssues.length ? `<ul class="log" style="padding:4px 16px 12px">${o.followIssues.slice().sort((a, b) => b.t - a.t).map(e => `<li>
         <div class="meta"><b>${esc(e.byName)}</b><span class="num">${fmtT(e.t)}</span>${canTouchEntry(e) ?
           `<a href="javascript:void(0)" onclick="A.delFollow('${o.id}','${e.id}')">删</a>` : ""}</div>
-        <div class="txt">${esc(e.text)}</div></li>`).join("")}</ul>` : `<div class="empty">暂无记录</div>`}</div>
+        ${e.text ? `<div class="txt">${esc(e.text)}</div>` : ""}${photoGallery(e.photos)}</li>`).join("")}</ul>` : `<div class="empty">暂无记录</div>`}</div>
   </section>
   ${isAdmin() ? `<section class="group"><div class="btn-row" style="padding-left:0;padding-right:0">
     <button class="btn danger ghost block" onclick="A.delOrder('${o.id}')">删除此订单</button></div></section>` : ""}`;
@@ -682,6 +761,34 @@ const A = {
   },
   modalCancel() { modalState = null; renderModal(); },
 
+  /* ---- 照片 ---- */
+  async addDraftPhotos(ctx, input) {
+    const files = [...(input.files || [])]; input.value = "";
+    if (!files.length) return;
+    photoDraft[ctx] = photoDraft[ctx] || [];
+    for (let k = 0; k < files.length; k++) {
+      toast(`上传照片 ${k + 1}/${files.length}…`);
+      try {
+        const url = await uploadOnePhoto(files[k]);
+        if (url) { photoDraft[ctx].push(url); const el = $("pe-" + ctx); if (el) el.innerHTML = pickerInner(ctx); }
+      } catch (e) { toast((e && e.error) || "有照片上传失败"); }
+    }
+    toast("照片已添加");
+  },
+  removeDraftPhoto(ctx, i) {
+    if (photoDraft[ctx]) { photoDraft[ctx].splice(i, 1); const el = $("pe-" + ctx); if (el) el.innerHTML = pickerInner(ctx); }
+  },
+  lightboxFromEl(el) {
+    try { lightbox = { photos: JSON.parse(el.getAttribute("data-gallery")), i: +el.getAttribute("data-i") || 0 }; renderLightbox(); }
+    catch (e) {}
+  },
+  lbStep(d) {
+    if (!lightbox) return;
+    const n = lightbox.photos.length;
+    lightbox.i = (lightbox.i + d + n) % n; renderLightbox();
+  },
+  closeLightbox() { lightbox = null; renderLightbox(); },
+
   async login() {
     const phone = $("lg-phone").value.trim(), password = $("lg-pass").value;
     try {
@@ -780,19 +887,9 @@ const A = {
     }, 300);
   },
 
-  async pickImg(input, key) {
-    const file = input.files && input.files[0]; if (!file) return;
-    A.syncFileName(input.id, file.name);
-    const fd = new FormData(); fd.append("image", file);
-    try {
-      const r = await fetch("/api/upload", { method: "POST", headers: { Authorization: "Bearer " + state.token }, body: fd });
-      const j = await r.json(); if (!r.ok) throw j;
-      imgDraft[key] = j.url; toast("图片已上传");
-    } catch (e) { toast((e && e.error) || "图片上传失败"); }
-  },
   collectScalars(section, into) {
     for (const f of state.fields[section].filter(f => f.type !== "log")) {
-      if (f.type === "image") { if (imgDraft[f.k]) into[f.k] = imgDraft[f.k]; continue; }
+      if (f.type === "image") { into[f.k] = photoDraft.img || []; continue; }
       const el = $("nf-" + f.k); if (el) into[f.k] = el.value.trim();
     }
   },
@@ -801,14 +898,19 @@ const A = {
     if (!season) return toast("请选择订单季节");
     const values = {}; A.collectScalars("order", values); A.collectScalars("production", values);
     if (!values.styleNo && !values.styleName) return toast("请至少填写货号或款式名");
-    try { await api("POST", "/orders", { season, values }); imgDraft = {}; await refresh(); go("orders"); toast("订单已创建"); }
+    try { await api("POST", "/orders", { season, values }); photoDraft = {}; await refresh(); go("orders"); toast("订单已创建"); }
     catch (e) { toast((e && e.error) || "创建失败"); }
   },
-  toggleBasic() { editingBasic = !editingBasic; imgDraft = {}; render(); },
+  toggleBasic() {
+    editingBasic = !editingBasic;
+    if (editingBasic) { const o = state.orders.find(x => x.id === route.id); photoDraft = { img: normalizePhotos(o && o.values.img) }; }
+    else photoDraft = {};
+    render();
+  },
   async saveBasic(oid) {
     const season = ($("nf-season") || {}).value || "";
     const values = {}; A.collectScalars("order", values); A.collectScalars("production", values);
-    await run(() => api("PATCH", "/orders/" + oid, { season, values }).then(() => { editingBasic = false; imgDraft = {}; }), "已保存修改");
+    await run(() => api("PATCH", "/orders/" + oid, { season, values }).then(() => { editingBasic = false; photoDraft = {}; }), "已保存修改");
   },
   delOrder(oid) {
     modal({ title: "删除此订单？", body: "删除后不可恢复，订单下的全部打卡记录一并删除。", danger: true, okText: "确认删除",
@@ -818,8 +920,9 @@ const A = {
   toggleAdd(key) { const b = $("add-" + key); if (b) b.classList.toggle("show"); },
   async addLog(oid, key) {
     const el = $("txt-" + key), text = ((el && el.value) || "").trim();
-    if (!text) return toast("请填写打卡内容");
-    await run(() => api("POST", `/orders/${oid}/logs`, { key, text }), "打卡成功");
+    const photos = photoDraft["log:" + key] || [];
+    if (!text && !photos.length) return toast("请填写打卡内容或加照片");
+    await run(() => api("POST", `/orders/${oid}/logs`, { key, text, photos }).then(() => { delete photoDraft["log:" + key]; }), "打卡成功");
   },
   editLog(oid, key, eid) {
     const o = state.orders.find(x => x.id === oid);
@@ -847,16 +950,19 @@ const A = {
     const items = [...document.querySelectorAll(".insp-row")].map(r => ({
       problem: r.querySelector(".insp-p").value.trim(), fix: r.querySelector(".insp-f").value.trim()
     })).filter(x => x.problem || x.fix);
-    if (!items.length) return toast("请至少填写一条问题");
-    await run(() => api("POST", `/orders/${oid}/inspections`, { date, items }), "验货记录已保存");
+    const photos = photoDraft.insp || [];
+    if (!items.length && !photos.length) return toast("请至少填写一条问题或加照片");
+    await run(() => api("POST", `/orders/${oid}/inspections`, { date, items, photos }).then(() => { delete photoDraft.insp; }), "验货记录已保存");
   },
   delInsp(oid, gid) {
     modal({ title: "删除这组验货记录？", danger: true, okText: "确认删除",
       onOk: () => run(() => api("DELETE", `/orders/${oid}/inspections/${gid}`), "已删除") });
   },
   async addFollow(oid) {
-    const text = ($("txt-follow").value || "").trim(); if (!text) return toast("请填写内容");
-    await run(() => api("POST", `/orders/${oid}/follow`, { text }), "已添加");
+    const text = ($("txt-follow").value || "").trim();
+    const photos = photoDraft.follow || [];
+    if (!text && !photos.length) return toast("请填写内容或加照片");
+    await run(() => api("POST", `/orders/${oid}/follow`, { text, photos }).then(() => { delete photoDraft.follow; }), "已添加");
   },
   delFollow(oid, eid) {
     modal({ title: "删除这条记录？", danger: true, okText: "确认删除",

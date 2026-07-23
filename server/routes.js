@@ -25,6 +25,12 @@ function saveOrder(o) {
   db.prepare("UPDATE orders SET season=?, updated_at=?, data=? WHERE id=?")
     .run(o.season, Date.now(), JSON.stringify(o.data), o.id);
 }
+// 只接受本系统 /uploads/ 下的图片路径，最多 100 张，避免存入恶意 URL
+function cleanPhotos(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.filter(x => typeof x === "string" && /^\/uploads\/[\w.\-]+$/.test(x)).slice(0, 100);
+}
+
 function orderPublic(o) {
   return { id: o.id, season: o.season, createdBy: o.created_by, createdAt: o.created_at,
     values: o.data.values || {}, logs: o.data.logs || {}, subs: o.data.subs || [],
@@ -283,8 +289,9 @@ router.post("/orders/:id/logs", (req, res) => {
   const list = listForKey(o, key);
   if (!list) return res.status(400).json({ error: "字段不存在" });
   const t = String(text || "").trim();
-  if (!t) return res.status(400).json({ error: "请填写打卡内容" });
-  list.push({ id: uid(), by: req.user.id, byName: req.user.name, t: Date.now(), text: t });
+  const photos = cleanPhotos((req.body || {}).photos);
+  if (!t && !photos.length) return res.status(400).json({ error: "请填写打卡内容或添加照片" });
+  list.push({ id: uid(), by: req.user.id, byName: req.user.name, t: Date.now(), text: t, photos });
   saveOrder(o);
   res.json(orderPublic(loadOrder(o.id)));
 });
@@ -297,8 +304,9 @@ router.patch("/orders/:id/logs/:key/:entryId", (req, res) => {
   if (!e) return res.status(404).json({ error: "记录不存在" });
   if (!A.canTouchEntry(req.user, e)) return res.status(403).json({ error: "只能修改自己的打卡记录" });
   const t = String((req.body || {}).text || "").trim();
-  if (!t) return res.status(400).json({ error: "内容不能为空" });
-  e.text = t; saveOrder(o);
+  const photos = Array.isArray((req.body || {}).photos) ? cleanPhotos((req.body || {}).photos) : (e.photos || []);
+  if (!t && !photos.length) return res.status(400).json({ error: "内容和照片不能都为空" });
+  e.text = t; e.photos = photos; saveOrder(o);
   res.json(orderPublic(loadOrder(o.id)));
 });
 
@@ -332,8 +340,10 @@ router.post("/orders/:id/inspections", (req, res) => {
   if (!date) return res.status(400).json({ error: "请选择验货日期" });
   const clean = (items || []).map(x => ({ problem: String(x.problem || "").trim(), fix: String(x.fix || "").trim() }))
     .filter(x => x.problem || x.fix);
-  if (!clean.length) return res.status(400).json({ error: "请至少填写一条问题" });
-  o.data.inspections.push({ id: uid(), date, by: req.user.id, byName: req.user.name, t: Date.now(), items: clean });
+  const inspPhotos = cleanPhotos((req.body || {}).photos);
+  if (!clean.length && !inspPhotos.length) return res.status(400).json({ error: "请至少填写一条问题或添加照片" });
+  o.data.inspections.push({ id: uid(), date, by: req.user.id, byName: req.user.name, t: Date.now(),
+    items: clean, photos: inspPhotos });
   saveOrder(o);
   res.json(orderPublic(loadOrder(o.id)));
 });
@@ -353,8 +363,9 @@ router.post("/orders/:id/follow", (req, res) => {
   const o = loadOrder(req.params.id);
   if (!o) return res.status(404).json({ error: "订单不存在" });
   const t = String((req.body || {}).text || "").trim();
-  if (!t) return res.status(400).json({ error: "请填写内容" });
-  o.data.followIssues.push({ id: uid(), by: req.user.id, byName: req.user.name, t: Date.now(), text: t });
+  const photos = cleanPhotos((req.body || {}).photos);
+  if (!t && !photos.length) return res.status(400).json({ error: "请填写内容或添加照片" });
+  o.data.followIssues.push({ id: uid(), by: req.user.id, byName: req.user.name, t: Date.now(), text: t, photos });
   saveOrder(o);
   res.json(orderPublic(loadOrder(o.id)));
 });

@@ -73,6 +73,32 @@ async function call(method, path, token, body) {
   ok((await call("POST", `/orders/${o1.id}/inspections`, aT, { date: "2026-07-20", items: [{ problem: "P", fix: "F" }] })).status === 200, "新增验货记录");
   ok((await call("POST", `/orders/${o1.id}/follow`, aT, { text: "跟单问题测试" })).status === 200, "新增跟单问题");
 
+  // ---- 照片 ----
+  // 打卡带照片，且恶意/外部 URL 被过滤，只留 /uploads/ 路径
+  const lp = await call("POST", `/orders/${o1.id}/logs`, aT, { key: "cutting", text: "带图打卡",
+    photos: ["/uploads/a1.jpg", "javascript:alert(1)", "https://evil.com/x.jpg", "/uploads/a2.jpg"] });
+  const cutE = lp.j.logs.cutting.find(e => e.text === "带图打卡");
+  ok(lp.status === 200 && cutE.photos.length === 2 && cutE.photos[0] === "/uploads/a1.jpg", "打卡照片保存且只留 /uploads/ 路径");
+  // 只发照片、不写字也可以
+  ok((await call("POST", `/orders/${o1.id}/logs`, aT, { key: "cutting", text: "", photos: ["/uploads/only.jpg"] })).status === 200, "只发照片也能打卡");
+  // 文字和照片都空则拒绝
+  ok((await call("POST", `/orders/${o1.id}/logs`, aT, { key: "cutting", text: "", photos: [] })).status === 400, "文字照片都空被拒");
+  // 编辑打卡只改文字，照片保留
+  const eid = cutE.id;
+  const ed = await call("PATCH", `/orders/${o1.id}/logs/cutting/${eid}`, aT, { text: "改了字" });
+  const cutE2 = ed.j.logs.cutting.find(e => e.id === eid);
+  ok(ed.status === 200 && cutE2.text === "改了字" && cutE2.photos.length === 2, "编辑打卡改字不丢照片");
+  // 验货带照片；只发照片也行
+  ok((await call("POST", `/orders/${o1.id}/inspections`, aT, { date: "2026-07-20", items: [], photos: ["/uploads/insp.jpg"] })).status === 200, "验货只加照片也能存");
+  const ins = await call("GET", `/orders/${o1.id}`, aT);
+  ok(ins.j.inspections.some(g => (g.photos || []).includes("/uploads/insp.jpg")), "验货照片已保存");
+  // 跟单带照片
+  const fl = await call("POST", `/orders/${o1.id}/follow`, aT, { text: "带图跟单", photos: ["/uploads/f1.jpg"] });
+  ok(fl.status === 200 && fl.j.followIssues.some(e => e.text === "带图跟单" && (e.photos || []).includes("/uploads/f1.jpg")), "跟单照片已保存");
+  // 款式图多图相册
+  const alb = await call("POST", "/orders", aT, { season: "SS2027", values: { styleNo: "ALB-1", img: ["/uploads/p1.jpg", "/uploads/p2.jpg", "/uploads/p3.jpg"] } });
+  ok(alb.status === 200 && Array.isArray(alb.j.values.img) && alb.j.values.img.length === 3, "款式图可存多张");
+
   // export xlsx (admin only)
   const exp = await fetch(BASE + "/export", { headers: { Authorization: "Bearer " + aT } });
   const buf = Buffer.from(await exp.arrayBuffer());
