@@ -46,6 +46,7 @@
 }
 
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{touch-action:manipulation}
 html,body{margin:0;padding:0}
 body{
   background:var(--bg); color:var(--ink);
@@ -84,8 +85,9 @@ a{color:var(--blue-2);text-decoration:none}
 .group{margin-bottom:22px}
 .group-title{
   font-size:13px;color:var(--ink-2);text-transform:none;letter-spacing:.01em;
-  padding:0 16px 7px;font-weight:400;
+  padding:0 16px 7px;font-weight:400;display:flex;align-items:center;min-height:26px;
 }
+.group-title .right{margin-left:auto}
 .group-note{font-size:13px;color:var(--ink-2);padding:7px 16px 0;line-height:1.4}
 .card{background:var(--card);border-radius:var(--radius-lg);box-shadow:var(--shadow);overflow:hidden}
 .card-pad{padding:16px}

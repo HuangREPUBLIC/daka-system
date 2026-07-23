@@ -129,7 +129,7 @@ async function apiAs(phone, method, p, body) {
   ok(doc.getElementById("nf-deadline--label").textContent === todayCn, "新建订单日期默认当天且显示中文");
   ok(doc.getElementById("nf-deadline").value === todayIso, "底层日期值就是本地当天（不受 UTC 时差影响）");
   ok(doc.getElementById("nf-shipDate--label").textContent === todayCn, "发货日期同样默认当天");
-  ok(!!doc.getElementById("pe-img") && app().includes("加照片"), "款式图是多图相册选择器");
+  ok(!!doc.getElementById("pe-img") && app().includes("添加"), "款式图是多图相册选择器");
   ok(doc.querySelector("#imp-file--name") && doc.querySelector("#imp-file--name").textContent.includes("未选择文件"), "CSV 文件控件仍显示中文");
   ok(!/Choose File|No file chosen/i.test(app()), "没有英文文件选择文案");
   ok(doc.getElementById("nf-deadline").type === "date", "底层仍是原生日期控件（手机可调系统日期轮）");

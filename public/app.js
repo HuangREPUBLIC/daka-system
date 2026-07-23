@@ -216,11 +216,11 @@ function compressImage(file) {
     rd.onload = () => {
       const img = new Image();
       img.onload = () => {
-        const max = 1600, scale = Math.min(1, max / Math.max(img.width, img.height));
+        const max = 2000, scale = Math.min(1, max / Math.max(img.width, img.height));
         const w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
         const c = document.createElement("canvas"); c.width = w; c.height = h;
         c.getContext("2d").drawImage(img, 0, 0, w, h);
-        c.toBlob(b => resolve(b || file), "image/jpeg", 0.82);
+        c.toBlob(b => resolve(b || file), "image/jpeg", 0.85);
       };
       img.onerror = () => resolve(file);
       img.src = rd.result;
@@ -247,7 +247,7 @@ function pickerInner(ctx) {
   const list = photoDraft[ctx] || [];
   return photoThumbs(list, true, ctx) +
     `<label class="ph-add"><input type="file" accept="image/*" multiple style="display:none" onchange="A.addDraftPhotos('${ctx}',this)">
-      <span class="ph-plus">＋</span><span>加照片</span></label>`;
+      <span class="ph-plus">＋</span><span>添加</span></label>`;
 }
 function photoPicker(ctx) { return `<div class="photos-grid" id="pe-${ctx}">${pickerInner(ctx)}</div>`; }
 function photoGallery(urls) {
@@ -486,7 +486,7 @@ function vDetail() {
     </div></div></section>
 
   <section class="group">
-    <div class="group-title">一、订单明细${canB ? `<button class="btn plain right" onclick="A.toggleBasic()">${editingBasic ? "取消" : "编辑"}</button>` : ""}</div>
+    <div class="group-title">一、订单明细${canB ? `<button class="btn mini ghost right" onclick="A.toggleBasic()">${editingBasic ? "取消" : "编辑"}</button>` : ""}</div>
     <div class="card">${editingBasic && canB
       ? `<label class="field"><span>订单季节</span>${seasonSelectHtml(o.season)}</label>${editForm("order")}
          <div class="group-title" style="padding-top:12px">生产安排字段</div>${editForm("production")}
@@ -521,7 +521,7 @@ function vDetail() {
   </section>
 
   <section class="group">
-    <div class="group-title">三、验货问题<button class="btn plain right" onclick="A.toggleAdd('insp')">＋ 新增</button></div>
+    <div class="group-title">三、验货问题<button class="btn mini ghost right" onclick="A.toggleAdd('insp')">＋ 新增</button></div>
     <div class="card">
       <div class="addbox" id="add-insp">
         <label class="field"><span>验货日期</span>${dateFieldHtml("insp-date", todayStr())}</label>
@@ -541,7 +541,7 @@ function vDetail() {
   </section>
 
   <section class="group">
-    <div class="group-title">四、跟单问题<button class="btn plain right" onclick="A.toggleAdd('follow')">＋ 添加</button></div>
+    <div class="group-title">四、跟单问题<button class="btn mini ghost right" onclick="A.toggleAdd('follow')">＋ 添加</button></div>
     <div class="card">
       <div class="addbox" id="add-follow" style="padding:12px 16px">
         <textarea class="in" id="txt-follow" placeholder="填写跟单过程中的问题、沟通事项…"></textarea>
