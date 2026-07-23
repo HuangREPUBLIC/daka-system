@@ -321,3 +321,13 @@ table.tbl{border-collapse:collapse;width:100%;font-size:15px;min-width:460px}
   z-index:99;opacity:0;transition:opacity .22s;pointer-events:none;max-width:86vw;text-align:center}
 .msg.show{opacity:1}
 @media (prefers-reduced-motion: reduce){.msg{transition:none}}
+
+/* ---- 安装引导 ---- */
+.install-cta{margin-top:12px}
+.guide{text-align:left}
+.guide-step{font-size:15px;line-height:1.7;padding:4px 0}
+.guide-step b{color:var(--blue-2);margin-right:4px}
+.ios-share{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;
+  border:1.5px solid var(--blue-2);border-radius:5px;color:var(--blue-2);font-size:14px;vertical-align:-5px}
+.guide-note{margin-top:10px;font-size:13px;color:var(--ink-2);background:var(--sky-soft);
+  border-radius:9px;padding:8px 11px;line-height:1.5}

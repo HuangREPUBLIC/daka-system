@@ -141,6 +141,12 @@ async function apiAs(phone, method, p, body) {
 
   A.forceLogout(); await sleep(200);
   ok(app().includes("<svg") && app().includes("login-logo"), "登录页使用 SVG 应用图标");
+  ok(app().includes("install-cta") && app().includes("安装到手机"), "登录页有安装入口");
+  // 安装引导（jsdom 无 beforeinstallprompt，会走图文引导）
+  A.install(); await sleep(150);
+  ok(doc.getElementById("mask").classList.contains("show") && doc.getElementById("mask").innerHTML.includes("添加到主屏"),
+     "点安装弹出图文引导");
+  A.modalCancel(); await sleep(100);
 
   console.log(`\n结果：PASS ${pass}, FAIL ${fail}`);
   process.exit(fail ? 1 : 0);

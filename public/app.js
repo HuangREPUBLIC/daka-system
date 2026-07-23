@@ -18,6 +18,10 @@ let route = { v: "orders", id: null };
 let editingBasic = false, imgDraft = {}, importPreview = null, importRaw = "";
 let filt = { season: "", sales: "", follower: "", kw: "" };
 let modalState = null;
+let deferredInstall = null;   // 安卓/桌面 Chrome 的原生安装事件
+// 是否已经是「装到主屏后打开」的状态
+const isStandalone = () => (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches)
+  || window.navigator.standalone === true;
 
 /* ================= 工具 ================= */
 const $ = id => document.getElementById(id);
@@ -279,6 +283,7 @@ function vLogin() {
     </div>
     <button class="btn block login-btn" onclick="A.login()">登 录</button>
     <div class="login-foot"><button class="btn plain" onclick="A.openForgotPw()">忘记密码 / 修改密码</button></div>
+    ${isStandalone() ? "" : `<button class="btn ghost block install-cta" onclick="A.install()">📲 安装到手机（像 App 一样用）</button>`}
   </div></div>`;
 }
 
@@ -661,6 +666,7 @@ function vAccount() {
 
   <section class="group">
     <div class="btn-row" style="padding-left:0;padding-right:0">
+      ${isStandalone() ? "" : `<button class="btn ghost block" style="margin-bottom:10px" onclick="A.install()">📲 安装到手机</button>`}
       <button class="btn danger ghost block" onclick="A.logout()">退出登录</button></div>
   </section>`;
 }
@@ -683,6 +689,39 @@ const A = {
       state.token = r.token; localStorage.setItem("daka_token", r.token);
       await refresh(); go("orders"); toast("欢迎，" + r.user.name);
     } catch (e) { toast((e && e.error) || "登录失败"); }
+  },
+  async install() {
+    if (isStandalone()) return toast("已经是从主屏打开的了");
+    if (deferredInstall) {                      // 安卓 / 桌面 Chrome：直接弹系统安装框
+      deferredInstall.prompt();
+      try { await deferredInstall.userChoice; } catch (e) {}
+      deferredInstall = null;
+      return;
+    }
+    A.installGuide();                           // iOS 等：给图文步骤
+  },
+  installGuide() {
+    const ua = navigator.userAgent || "";
+    const isIOS = /iPhone|iPad|iPod/i.test(ua);
+    const isWeixin = /MicroMessenger/i.test(ua);
+    let steps;
+    if (isWeixin) {
+      steps = `<div class="guide-step"><b>1.</b> 点右上角 <b>···</b> 菜单</div>
+        <div class="guide-step"><b>2.</b> 选「在浏览器打开」（Safari 或 Chrome）</div>
+        <div class="guide-step"><b>3.</b> 再按下面的步骤添加到主屏</div>
+        <div class="guide-note">微信内置浏览器不能直接装，要先用系统浏览器打开</div>`;
+    } else if (isIOS) {
+      steps = `<div class="guide-step"><b>1.</b> 点底部中间的 <span class="ios-share"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M6 12v7a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-7"/></svg></span> 分享按钮
+          （方框加向上箭头）</div>
+        <div class="guide-step"><b>2.</b> 在菜单里找到 <b>「添加到主屏幕」</b></div>
+        <div class="guide-step"><b>3.</b> 右上角点「添加」，桌面就出现图标了</div>`;
+    } else {
+      steps = `<div class="guide-step"><b>1.</b> 点浏览器右上角 <b>⋮</b> 菜单</div>
+        <div class="guide-step"><b>2.</b> 选 <b>「安装应用」</b> 或「添加到主屏幕」</div>
+        <div class="guide-step"><b>3.</b> 确认，桌面就出现图标了</div>`;
+    }
+    modal({ title: "装到手机主屏", html: `<div class="guide">${steps}</div>`,
+      okText: "知道了", onOk: () => A.modalCancel() });
   },
   logout() {
     modal({ title: "退出登录？", body: "下次需要重新输入手机号和密码。", danger: true, okText: "退出",
@@ -1071,6 +1110,12 @@ const A = {
 
 /* ================= 启动 ================= */
 window.go = go; window.A = A;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault(); deferredInstall = e;      // 存起来，等用户点「安装到手机」再弹
+  if (state.me || !$("app").innerHTML) { /* 下次渲染时按钮自然出现 */ }
+});
+window.addEventListener("appinstalled", () => { deferredInstall = null; toast("已添加到手机主屏"); });
+
 (async function boot() {
   if (state.token) {
     try { await refresh(); }
