@@ -20,6 +20,9 @@ let filt = { season: "", sales: "", follower: "", kw: "" };
 let modalState = null;
 let deferredInstall = null;   // 安卓/桌面 Chrome 的原生安装事件
 // 是否已经是「装到主屏后打开」的状态
+// 是不是手机/平板（触屏移动设备）——电脑上不显示"安装到手机"
+const isMobileDevice = () => /iPhone|iPad|iPod|Android|Mobile|HarmonyOS/i.test(navigator.userAgent || "")
+  || (navigator.maxTouchPoints > 1 && window.matchMedia && window.matchMedia("(pointer:coarse)").matches);
 const isStandalone = () => (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches)
   || window.navigator.standalone === true;
 
@@ -385,7 +388,7 @@ function vLogin() {
     </div>
     <button class="btn block login-btn" onclick="A.login()">登 录</button>
     <div class="login-foot"><button class="btn plain" onclick="A.openForgotPw()">忘记密码 / 修改密码</button></div>
-    ${isStandalone() ? "" : `<button class="btn ghost block install-cta" onclick="A.install()">📲 安装到手机（像 App 一样用）</button>`}
+    ${(isStandalone() || !isMobileDevice()) ? "" : `<button class="btn ghost block install-cta" onclick="A.install()">📲 安装到手机（像 App 一样用）</button>`}
   </div></div>`;
 }
 
@@ -778,7 +781,7 @@ function vAccount() {
 
   <section class="group">
     <div class="btn-row" style="padding-left:0;padding-right:0">
-      ${isStandalone() ? "" : `<button class="btn ghost block" style="margin-bottom:10px" onclick="A.install()">📲 安装到手机</button>`}
+      ${(isStandalone() || !isMobileDevice()) ? "" : `<button class="btn ghost block" style="margin-bottom:10px" onclick="A.install()">📲 安装到手机</button>`}
       <button class="btn danger ghost block" onclick="A.logout()">退出登录</button></div>
   </section>`;
 }
