@@ -33,16 +33,9 @@ async function apiAs(phone, method, p, body) {
   const mask = () => doc.getElementById("mask");
   const A = window.A, st = () => window.eval("state");
 
-  // ---- 忘记密码：弹窗，而不是撑长登录页 ----
-  ok(!app().includes("pwbox"), "登录页不再内嵌改密表单");
-  A.openForgotPw(); await sleep(150);
-  ok(mask().classList.contains("show") && mask().innerHTML.includes("fp-phone"), "点忘记密码弹出弹窗");
-  doc.getElementById("fp-phone").value = "13800000000";
-  doc.getElementById("fp-p1").value = "abc"; doc.getElementById("fp-p2").value = "xyz";
-  await A.modalOk(); await sleep(200);
-  ok(mask().classList.contains("show"), "两次密码不一致时弹窗不关闭");
-  A.modalCancel(); await sleep(100);
-  ok(!mask().classList.contains("show"), "可取消弹窗");
+  // ---- 登录页已移除"忘记密码"自助改密（改为管理员重置 / 登录后自改）----
+  ok(!app().includes("忘记密码"), "登录页不再有忘记密码入口");
+  ok(typeof A.openForgotPw === "undefined", "自助改密函数已移除");
 
   // ---- 登录 ----
   doc.getElementById("lg-phone").value = "13800000000";

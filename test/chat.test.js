@@ -104,6 +104,13 @@ async function call(m,p,t,b){const h={"Content-Type":"application/json"};if(t)h.
   const ur = await parseUpload(aT, "u.csv", Buffer.from("季节,货号\nSS2027,U-1\n", "utf8"), "text/csv");
   ok(ur.status === 200 && ur.j.rows[0][0] === "季节" && ur.j.encoding === "UTF-8", "UTF-8 编码的 CSV 正常");
 
+  // 带图片的 Excel：图片会被忽略，文字数据照样解析出来
+  const fs = require("fs"), path = require("path");
+  const imgXlsx = fs.readFileSync(path.join(__dirname, "fixtures", "with-image.xlsx"));
+  const ix = await parseUpload(aT, "带图.xlsx", imgXlsx, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  ok(ix.status === 200 && ix.j.rows.length >= 3, "带图片的 Excel 也能解析出数据行");
+  ok(ix.j.rows[0].includes("货号") && ix.j.rows[1].includes("IMG-001"), "带图片 Excel 的表头和数据正确");
+
   ok((await parseUpload(aT, "x.pdf", Buffer.from("%PDF"), "application/pdf")).status === 400, "不支持的格式被拒绝");
 
   // 员工打卡记录

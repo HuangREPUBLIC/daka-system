@@ -387,7 +387,6 @@ function vLogin() {
           onkeydown="if(event.key==='Enter')A.login()"></label>
     </div>
     <button class="btn block login-btn" onclick="A.login()">登 录</button>
-    <div class="login-foot"><button class="btn plain" onclick="A.openForgotPw()">忘记密码 / 修改密码</button></div>
     ${(isStandalone() || !isMobileDevice()) ? "" : `<button class="btn ghost block install-cta" onclick="A.install()">📲 安装到手机（像 App 一样用）</button>`}
   </div></div>`;
 }
@@ -874,24 +873,6 @@ const A = {
     state.token = null; state.me = null; localStorage.removeItem("daka_token");
     route = { v: "orders", id: null }; render();
   },
-  openForgotPw() {
-    modal({
-      title: "忘记密码 / 修改密码", okText: "确认修改",
-      html: `<label class="field" style="border:0;padding:0 0 10px"><span>手机号</span><input class="in" id="fp-phone" inputmode="tel"></label>
-        <label class="field" style="border:0;padding:0 0 10px"><span>新密码</span><input class="in" id="fp-p1" type="password"></label>
-        <label class="field" style="border:0;padding:0"><span>确认新密码</span><input class="in" id="fp-p2" type="password"></label>`,
-      keepOpenOnOk: true,
-      onOk: async () => {
-        const phone = ($("fp-phone").value || "").trim(), p1 = $("fp-p1").value, p2 = $("fp-p2").value;
-        if (!phone) return toast("请填写手机号");
-        if (!p1 || p1 !== p2) return toast("两次输入的新密码不一致");
-        try {
-          await api("POST", "/password/reset", { phone, newPassword: p1 });
-          A.modalCancel(); toast("密码已修改，请用新密码登录");
-        } catch (e) { toast((e && e.error) || "修改失败"); }
-      }
-    });
-  },
   async changeMyPw() {
     const p1 = $("my-p1").value, p2 = $("my-p2").value;
     if (!p1 || p1 !== p2) return toast("两次输入的新密码不一致");
@@ -1172,9 +1153,15 @@ const A = {
   // 二维数组（首行表头）-> 待确认的订单列表
   rowsToPreview(grid) {
     const MAP = A.importMap();
-    const heads = (grid[0] || []).map(h => String(h == null ? "" : h).trim().replace(/^\uFEFF/, ""));
+    // 找表头行：前 10 行里第一行"含已知列名"的行（容忍标题行/空行在上面）
+    let hi = 0;
+    for (let i = 0; i < Math.min(grid.length, 10); i++) {
+      const cs = (grid[i] || []).map(c => String(c == null ? "" : c).trim());
+      if (cs.some(c => MAP[c])) { hi = i; break; }
+    }
+    const heads = (grid[hi] || []).map(h => String(h == null ? "" : h).trim().replace(/^\uFEFF/, ""));
     const out = [];
-    for (let i = 1; i < grid.length; i++) {
+    for (let i = hi + 1; i < grid.length; i++) {
       const cells = grid[i] || [];
       if (!cells.some(c => String(c == null ? "" : c).trim())) continue;
       const values = {}; let season = "";

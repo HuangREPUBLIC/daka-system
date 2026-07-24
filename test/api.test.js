@@ -108,6 +108,8 @@ async function call(method, path, token, body) {
 
   // no-token blocked
   ok((await call("GET", "/bootstrap", null)).status === 401, "未登录被拦截");
+  // 安全：公网"凭手机号自助改密"已移除（原来可盗号）
+  ok((await call("POST", "/password/reset", null, { phone: "13800000000", newPassword: "x" })).status >= 400, "自助改密接口已下线（未登录无法改密）");
 
   console.log(`\n结果：PASS ${pass}, FAIL ${fail}`);
   process.exit(fail ? 1 : 0);

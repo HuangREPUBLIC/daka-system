@@ -82,15 +82,8 @@ router.post("/login", (req, res) => {
   res.json({ token: A.signToken(u), user: A.userPublic(u) });
 });
 
-// 忘记密码：手机号 + 新密码直接改（按需求不加短信验证码）
-router.post("/password/reset", (req, res) => {
-  const { phone, newPassword } = req.body || {};
-  if (!newPassword || String(newPassword).length < 4) return res.status(400).json({ error: "新密码至少 4 位" });
-  const u = db.prepare("SELECT * FROM users WHERE phone = ? AND deleted = 0").get(String(phone || "").trim());
-  if (!u) return res.status(404).json({ error: "找不到该手机号对应的账号" });
-  db.prepare("UPDATE users SET password_hash=? WHERE id=?").run(A.hashPassword(newPassword), u.id);
-  res.json({ ok: true });
-});
+// 已移除"凭手机号自助改密"（公网下会被拿来盗号）。
+// 改密码：登录后在「我的」自行修改；忘记密码找管理员在后台重置。
 
 /* 以下全部需要登录 */
 router.use(A.authRequired);
@@ -544,10 +537,15 @@ router.post("/chat/upload", chatUpload.single("file"), (req, res) => {
  * CSV 先按 UTF-8 解，出现乱码字符时自动改用 GBK
  *（Windows 版 Excel「另存为 CSV」默认就是 GBK，不处理会中文全乱码）。
  */
-const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 const IMPORT_EXT = [".xlsx", ".xls", ".csv", ".txt"];
 
-router.post("/import/parse", memUpload.single("file"), (req, res) => {
+router.post("/import/parse", (req, res, next) => {
+  memUpload.single("file")(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.code === "LIMIT_FILE_SIZE" ? "文件太大（超过 50MB），请压缩图片后再导入" : "文件上传失败" });
+    next();
+  });
+}, (req, res) => {
   if (!req.file) return res.status(400).json({ error: "请选择文件" });
   const ext = path.extname(req.file.originalname || "").toLowerCase();
   if (!IMPORT_EXT.includes(ext))
