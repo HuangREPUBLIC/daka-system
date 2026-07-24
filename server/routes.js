@@ -175,9 +175,11 @@ router.delete("/users/:id", A.adminRequired, (req, res) => {
 router.post("/fields", A.adminRequired, (req, res) => {
   const { section, label, type, options } = req.body || {};
   if (!["order", "production"].includes(section)) return res.status(400).json({ error: "板块不对" });
-  if (!label) return res.status(400).json({ error: "请填写字段名称" });
+  const lb = String(label || "").trim();
+  if (!lb) return res.status(400).json({ error: "请填写字段名称" });
   const fields = getSetting("fields", { order: [], production: [] });
-  const f = { k: "f" + Date.now(), label: String(label).trim(), type: type || "text" };
+  if (fields[section].some(x => x.label === lb)) return res.status(400).json({ error: `「${lb}」字段已存在，不能重复添加` });
+  const f = { k: "f" + Date.now(), label: lb, type: type || "text" };
   if (type === "select") f.options = (options || []).map(s => String(s).trim()).filter(Boolean);
   fields[section].push(f);
   setSetting("fields", fields);

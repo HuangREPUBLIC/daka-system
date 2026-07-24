@@ -350,7 +350,10 @@ table.tbl{border-collapse:collapse;width:100%;font-size:15px;min-width:460px}
 /* ---- 大图查看器 ---- */
 .lightbox{position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.92);
   display:flex;align-items:center;justify-content:center;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
-.lightbox .lb-img{max-width:100%;max-height:100%;object-fit:contain}
+.lightbox .lb-img{max-width:100%;max-height:100%;object-fit:contain;touch-action:none;
+  will-change:transform;transform-origin:center center;user-select:none;-webkit-user-drag:none}
+.lb-hint{position:absolute;bottom:calc(env(safe-area-inset-bottom,0) + 14px);left:0;right:0;text-align:center;
+  color:rgba(255,255,255,.55);font-size:12.5px;pointer-events:none}
 .lb-bar{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;
   padding:calc(env(safe-area-inset-top,0) + 10px) 16px 10px;color:#fff}
 .lb-count{font-size:15px;opacity:.85}

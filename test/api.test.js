@@ -68,6 +68,7 @@ async function call(method, path, token, body) {
   // custom field
   const cf = await call("POST", "/fields", aT, { section: "production", label: "吊牌进度", type: "log" });
   ok(cf.status === 200 && cf.j.production.some(f => f.label === "吊牌进度"), "新增自定义打卡字段");
+  ok((await call("POST", "/fields", aT, { section: "production", label: "吊牌进度", type: "log" })).status === 400, "同名字段不能重复添加");
 
   // inspection + follow
   ok((await call("POST", `/orders/${o1.id}/inspections`, aT, { date: "2026-07-20", items: [{ problem: "P", fix: "F" }] })).status === 200, "新增验货记录");

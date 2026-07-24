@@ -255,6 +255,35 @@ function photoGallery(urls) {
   if (!urls.length) return "";
   return `<div class="photos-grid ro">${photoThumbs(urls, false)}</div>`;
 }
+// 给大图加双指缩放 + 拖动 + 双击（页面本身仍锁定缩放，这里单独放开）
+function attachLightboxGestures(img) {
+  let scale = 1, tx = 0, ty = 0, mode = null;
+  let startDist = 0, startScale = 1, startX = 0, startY = 0, startTx = 0, startTy = 0, lastTap = 0;
+  const apply = () => { img.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; };
+  const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  img.addEventListener("touchstart", (e) => {
+    if (e.touches.length === 2) {
+      mode = "pinch"; startDist = dist(e.touches); startScale = scale; startTx = tx; startTy = ty; e.preventDefault();
+    } else if (e.touches.length === 1) {
+      const now = Date.now();
+      if (now - lastTap < 300) {              // 双击：放大 / 还原
+        if (scale > 1) { scale = 1; tx = 0; ty = 0; } else { scale = 2.5; }
+        apply(); e.preventDefault();
+      } else if (scale > 1) {                 // 放大后单指拖动
+        mode = "pan"; startX = e.touches[0].clientX; startY = e.touches[0].clientY; startTx = tx; startTy = ty;
+      }
+      lastTap = now;
+    }
+  }, { passive: false });
+  img.addEventListener("touchmove", (e) => {
+    if (mode === "pinch" && e.touches.length === 2) {
+      scale = Math.min(5, Math.max(1, startScale * dist(e.touches) / startDist)); apply(); e.preventDefault();
+    } else if (mode === "pan" && e.touches.length === 1 && scale > 1) {
+      tx = startTx + (e.touches[0].clientX - startX); ty = startTy + (e.touches[0].clientY - startY); apply(); e.preventDefault();
+    }
+  }, { passive: false });
+  img.addEventListener("touchend", () => { if (scale <= 1) { scale = 1; tx = 0; ty = 0; apply(); } mode = null; });
+}
 function renderLightbox() {
   let el = document.getElementById("lightbox");
   if (!lightbox) { if (el) el.remove(); return; }
@@ -264,8 +293,12 @@ function renderLightbox() {
       <button class="lb-close" onclick="A.closeLightbox()">✕</button></div>
     <img class="lb-img" src="${esc(photos[i])}" alt="照片">
     ${photos.length > 1 ? `<button class="lb-nav prev" onclick="event.stopPropagation();A.lbStep(-1)">‹</button>
-      <button class="lb-nav next" onclick="event.stopPropagation();A.lbStep(1)">›</button>` : ""}`;
-  el.onclick = (e) => { if (e.target === el || (e.target.classList && e.target.classList.contains("lb-img"))) A.closeLightbox(); };
+      <button class="lb-nav next" onclick="event.stopPropagation();A.lbStep(1)">›</button>` : ""}
+    <div class="lb-hint">双指放大 · 双击还原</div>`;
+  // 只有点黑色背景才关闭；点图片是为了缩放，不关
+  el.onclick = (e) => { if (e.target === el) A.closeLightbox(); };
+  const img = el.querySelector(".lb-img");
+  if (img) attachLightboxGestures(img);
 }
 
 /* ================= 路由 ================= */
