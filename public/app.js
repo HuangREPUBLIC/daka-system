@@ -362,8 +362,9 @@ function tabbarHtml() {
 
 function render() {
   const app = $("app");
-  if (!me()) { app.innerHTML = vLogin(); return; }
+  // 欢迎界面不依赖 me() 是否已加载完成，这样能在接口返回前就先顶上，不留空白
   if (showWelcome) { app.innerHTML = vWelcome(); return; }
+  if (!me()) { app.innerHTML = vLogin(); return; }
   const meta = pageMeta();
   const views = { orders: vOrders, new: vNew, detail: vDetail, chat: vChat,
     admin: vAdmin, account: vAccount, staffLogs: vStaffLogs };
@@ -926,10 +927,16 @@ const A = {
     try {
       const r = await api("POST", "/login", { phone, password });
       state.token = r.token; localStorage.setItem("daka_token", r.token);
+      showWelcome = true; render();   // 密码验证通过就先顶上欢迎界面，不用等 bootstrap 接口回来
       await refresh();
-      showWelcome = true; go("orders");
+      go("orders");
       setTimeout(A.dismissWelcome, 1500);
-    } catch (e) { toast((e && e.error) || "登录失败"); }
+    } catch (e) {
+      // 只有「密码对了但 bootstrap 接口失败」才需要把已经顶上的欢迎界面收回去；
+      // 单纯密码错误时 showWelcome 还是 false，不用重渲染，否则会把用户刚输入的手机号也清空
+      if (showWelcome) { showWelcome = false; render(); }
+      toast((e && e.error) || "登录失败");
+    }
   },
   dismissWelcome() {
     if (!showWelcome) return;
@@ -1406,8 +1413,9 @@ window.addEventListener("appinstalled", () => { deferredInstall = null; toast("�
 
 (async function boot() {
   if (state.token) {
-    try { await refresh(); showWelcome = true; }
-    catch (e) { state.token = null; localStorage.removeItem("daka_token"); }
+    showWelcome = true; render();   // 有本地登录态就先顶上欢迎界面，接口在后台加载，避免打开时先空白一下
+    try { await refresh(); }
+    catch (e) { state.token = null; localStorage.removeItem("daka_token"); showWelcome = false; }
   }
   render();
   if (showWelcome) setTimeout(A.dismissWelcome, 1500);
