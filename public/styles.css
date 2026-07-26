@@ -92,6 +92,11 @@ a{color:var(--blue-2);text-decoration:none}
 }
 .group-title .right{margin-left:auto}
 .group-note{font-size:13px;color:var(--ink-2);padding:7px 16px 0;line-height:1.4}
+
+/* ---- 首页(订单列表)顶部品牌抬头：公司名称 + 跟单系统，不带 logo ---- */
+.home-brand{text-align:center;padding:2px 16px 6px}
+.home-brand .co{font-size:12.5px;color:var(--ink-2);font-weight:500}
+.home-brand .app{font-size:17px;font-weight:700;letter-spacing:-.02em;margin-top:1px}
 .card{background:var(--card);border-radius:var(--radius-lg);box-shadow:var(--shadow);overflow:hidden}
 .card-pad{padding:16px}
 

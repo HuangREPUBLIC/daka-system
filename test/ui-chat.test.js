@@ -44,6 +44,9 @@ async function apiAs(phone, method, p, body) {
   ok(app().includes("天津锦利国际贸易有限公司") && app().includes("跟单系统"), "登录后先显示欢迎界面(公司名+跟单系统)");
   A.dismissWelcome(); await sleep(500);
   ok(app().includes("订单列表"), "管理员登录");
+  ok(doc.querySelector(".home-brand .co").textContent === "天津锦利国际贸易有限公司"
+    && doc.querySelector(".home-brand .app").textContent === "跟单系统", "订单首页顶部带公司名称+跟单系统抬头(不含logo)");
+  ok(!doc.querySelector(".home-brand svg") && !doc.querySelector(".home-brand img"), "首页抬头不含logo图标");
 
   // ---- 导航：聊天取代我的打卡 ----
   ok(app().includes('data-tab="chat"') && !app().includes('data-tab="mine"'), "Tab 栏有「聊天」，没有「我的打卡」");
