@@ -392,10 +392,26 @@ table.tbl{border-collapse:collapse;width:100%;font-size:15px;min-width:460px}
 /* ---- 大类标题高亮（订单明细/生产明细/验货问题/跟单小结） ---- */
 .cat-title{
   display:inline-flex;align-items:center;
-  background:var(--sky-soft);color:var(--blue-2);
+  background:var(--blue-2);color:#fff;
   font-weight:700;font-size:14.5px;
-  padding:5px 13px;border-radius:99px;
+  padding:5px 14px;border-radius:99px;
+  box-shadow:0 3px 10px color-mix(in srgb,var(--blue-2) 50%,transparent);
 }
 
 /* ---- 详情页头部款式图缩略 ---- */
 .header-thumb{width:64px;height:64px;border-radius:14px;object-fit:cover;cursor:pointer;flex:none;box-shadow:var(--shadow)}
+
+/* ---- 行内小动作按钮（改/删/改名/删除/填写/补充说明），替代裸文字链接 ---- */
+.act-btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  background:var(--sky-soft);color:var(--blue-2);
+  font-size:12.5px;font-weight:600;line-height:1;
+  padding:6px 12px;min-height:28px;border-radius:99px;
+  border:0;cursor:pointer;white-space:nowrap;
+  transition:transform 140ms var(--ease-out), background-color 140ms ease, opacity 140ms ease;
+}
+.act-btn:active{transform:scale(0.93)}
+.act-btn.danger{background:var(--bad-soft);color:var(--bad)}
+.act-btn.ghost{background:transparent;box-shadow:inset 0 0 0 1px var(--line-2);color:var(--ink-2)}
+.act-btn + .act-btn{margin-left:7px}
+.act-row{display:inline-flex;align-items:center;flex-wrap:wrap;gap:0}
