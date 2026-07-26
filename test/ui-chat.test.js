@@ -173,6 +173,7 @@ async function apiAs(phone, method, p, body) {
   await A.saveInsp(o1.id); await sleep(500);
   ok(app().includes("UI测试-发现的新问题"), "业务员通过界面创建的验货问题显示出来");
   ok(app().includes("待整改"), "新建的问题整改情况显示「待整改」");
+  ok(app().includes("待整改（由") && app().includes("王建国"), "没权限时「待整改」标注了负责人是谁，不会让人误以为坏了");
   ok(!app().includes('onclick="A.editInspFix'), "业务员看不到「填写整改」链接(无权限)");
 
   A.forceLogout(); await sleep(150);

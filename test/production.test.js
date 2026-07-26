@@ -65,6 +65,16 @@ async function call(m, p, t, b) {
   ok((await call("POST", `/orders/${o1.id}/inspections`, sT, {})).status === 400, "空提交仍报错(无问题也无照片)");
   ok((await call("PATCH", `/orders/${o1.id}/inspections/${batch.id}/items/${itemId}`, sT, {})).status === 400, "PATCH 不传字段报错");
 
+  // ---- 没指定负责下厂员的订单：谁都填不了整改情况，只有管理员能填 ----
+  const noFollowerOrder = await call("POST", "/orders", sT, { season: "SS2027", values: { styleNo: "NOFLW-1", styleName: "未指定下厂员" } });
+  ok(noFollowerOrder.status === 200 && !noFollowerOrder.j.values.follower, "新建订单默认没有负责下厂员");
+  const nfCp = await call("POST", `/orders/${noFollowerOrder.j.id}/inspections`, sT, { problems: ["没人负责时的问题"] });
+  const nfItemId = nfCp.j.inspections[0].items[0].id;
+  ok((await call("PATCH", `/orders/${noFollowerOrder.j.id}/inspections/${nfCp.j.inspections[0].id}/items/${nfItemId}`, fT, { fix: "下厂员想填" })).status === 403,
+    "没指定负责人时，随便哪个下厂员都不能填整改");
+  ok((await call("PATCH", `/orders/${noFollowerOrder.j.id}/inspections/${nfCp.j.inspections[0].id}/items/${nfItemId}`, aT, { fix: "管理员填的" })).status === 200,
+    "没指定负责人时，管理员仍然能填整改(不会彻底卡死)");
+
   console.log(`\n结果：PASS ${pass}, FAIL ${fail}`);
   process.exit(fail ? 1 : 0);
 })();

@@ -523,10 +523,13 @@ function subCardHtml(o, s, canProdLog) {
 }
 // 验货：一条"发现问题/整改情况"的展示（两个字段各自独立可编辑）
 function inspItemHtml(o, g, it, canInsp, canFix) {
+  // 没权限填整改时，说清楚是谁该填，而不是只留一个空白的"待整改"（否则看着像坏了）
+  const fixHint = o.values.follower ? `由 ${esc(uname(o.values.follower))} 或管理员填写` : "尚未指定下厂员，需管理员先在「生产明细」指定负责人";
   return `<div class="insp-item">
     <div><span class="lbl p">发现问题</span>${esc(it.problem)}
       ${canInsp ? `<a href="javascript:void(0)" onclick="A.editInspProblem('${o.id}','${g.id}','${it.id}')" style="margin-left:6px;font-size:12.5px">改</a>` : ""}</div>
-    <div style="margin-top:4px"><span class="lbl f2">整改情况</span>${it.fix ? esc(it.fix) : `<span style="color:var(--ink-2)">待整改</span>`}
+    <div style="margin-top:4px"><span class="lbl f2">整改情况</span>${it.fix ? esc(it.fix)
+        : `<span style="color:var(--ink-2)">待整改${canFix ? "" : `（${fixHint}）`}</span>`}
       ${canFix ? `<a href="javascript:void(0)" onclick="A.editInspFix('${o.id}','${g.id}','${it.id}')" style="margin-left:6px;font-size:12.5px">${it.fix ? "改" : "填写"}</a>` : ""}</div>
     ${(it.notes || []).length ? it.notes.map(n => `<div style="margin-top:4px;font-size:12.5px;color:var(--ink-2)">补充说明（${esc(n.byName)} · ${fmtT(n.t)}）：${esc(n.text)}</div>`).join("") : ""}
     ${(canInsp || canFix) ? `<a href="javascript:void(0)" onclick="A.addInspNote('${o.id}','${g.id}','${it.id}')" style="font-size:12.5px">＋ 补充说明</a>` : ""}
