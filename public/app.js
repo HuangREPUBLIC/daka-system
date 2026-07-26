@@ -1403,10 +1403,11 @@ window.addEventListener("appinstalled", () => { deferredInstall = null; toast("å
 
 (async function boot() {
   if (state.token) {
-    try { await refresh(); }
+    try { await refresh(); showWelcome = true; }
     catch (e) { state.token = null; localStorage.removeItem("daka_token"); }
   }
   render();
+  if (showWelcome) setTimeout(A.dismissWelcome, 1500);
   if (state.me) { A.refreshUnread(); A.loadContacts(true); }
   setInterval(() => { if (state.me) A.refreshUnread(); }, 10000);
   setInterval(() => {
