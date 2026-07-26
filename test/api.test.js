@@ -71,7 +71,7 @@ async function call(method, path, token, body) {
   ok((await call("POST", "/fields", aT, { section: "production", label: "吊牌进度", type: "log" })).status === 400, "同名字段不能重复添加");
 
   // inspection + follow
-  ok((await call("POST", `/orders/${o1.id}/inspections`, aT, { date: "2026-07-20", items: [{ problem: "P", fix: "F" }] })).status === 200, "新增验货记录");
+  ok((await call("POST", `/orders/${o1.id}/inspections`, aT, { problems: ["P"] })).status === 200, "新增验货记录(业务员/管理员创建)");
   ok((await call("POST", `/orders/${o1.id}/follow`, aT, { text: "跟单问题测试" })).status === 200, "新增跟单问题");
 
   // ---- 照片 ----
@@ -89,10 +89,10 @@ async function call(method, path, token, body) {
   const ed = await call("PATCH", `/orders/${o1.id}/logs/cutting/${eid}`, aT, { text: "改了字" });
   const cutE2 = ed.j.logs.cutting.find(e => e.id === eid);
   ok(ed.status === 200 && cutE2.text === "改了字" && cutE2.photos.length === 2, "编辑打卡改字不丢照片");
-  // 验货带照片；只发照片也行
-  ok((await call("POST", `/orders/${o1.id}/inspections`, aT, { date: "2026-07-20", items: [], photos: ["/uploads/insp.jpg"] })).status === 200, "验货只加照片也能存");
+  // 验货带照片；只发照片、不写发现问题也行
+  ok((await call("POST", `/orders/${o1.id}/inspections`, aT, { problems: [], photos: ["/uploads/insp.jpg"] })).status === 200, "验货只加照片也能存");
   const ins = await call("GET", `/orders/${o1.id}`, aT);
-  ok(ins.j.inspections.some(g => (g.photos || []).includes("/uploads/insp.jpg")), "验货照片已保存");
+  ok(ins.j.inspections.some(g => (g.photos || []).includes("/uploads/insp.jpg") && g.items.length === 0), "验货照片已保存(无问题条目)");
   // 跟单带照片
   const fl = await call("POST", `/orders/${o1.id}/follow`, aT, { text: "带图跟单", photos: ["/uploads/f1.jpg"] });
   ok(fl.status === 200 && fl.j.followIssues.some(e => e.text === "带图跟单" && (e.photos || []).includes("/uploads/f1.jpg")), "跟单照片已保存");

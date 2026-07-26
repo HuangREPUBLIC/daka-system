@@ -43,7 +43,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const st = () => window.eval("state");
   const o1 = st().orders.find(o => o.values.styleNo === "SS27-T012");
   window.go("detail", o1.id); await sleep(200);
-  ok(app().includes("一、订单明细") && app().includes("二、生产明细") && app().includes("三、验货问题") && app().includes("四、跟单问题"), "详情页四大板块");
+  ok(app().includes("一、订单明细") && app().includes("二、生产明细") && app().includes("三、验货问题") && app().includes("四、跟单小结"), "详情页四大板块");
   doc.getElementById("txt-cutting").value = "E2E 打卡测试";
   await A.addLog(o1.id, "cutting"); await sleep(400);
   ok(app().includes("E2E 打卡测试"), "打卡后页面显示新记录");

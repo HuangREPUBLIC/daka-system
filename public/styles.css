@@ -388,3 +388,14 @@ table.tbl{border-collapse:collapse;width:100%;font-size:15px;min-width:460px}
   .msg{transition:opacity 200ms ease}
   .mask.show,.mask.show .modal,.lightbox{animation:fadeIn 150ms ease}
 }
+
+/* ---- 大类标题高亮（订单明细/生产明细/验货问题/跟单小结） ---- */
+.cat-title{
+  display:inline-flex;align-items:center;
+  background:var(--sky-soft);color:var(--blue-2);
+  font-weight:700;font-size:14.5px;
+  padding:5px 13px;border-radius:99px;
+}
+
+/* ---- 详情页头部款式图缩略 ---- */
+.header-thumb{width:64px;height:64px;border-radius:14px;object-fit:cover;cursor:pointer;flex:none;box-shadow:var(--shadow)}

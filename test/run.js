@@ -41,7 +41,7 @@ async function waitForServer(ms = 15000) {
     console.error("服务端启动失败：\n" + serverLog);
     process.exit(1);
   }
-  const suites = ["api.test.js", "rehire.test.js", "chat.test.js", "migrate.test.js", "pwa.test.js", "e2e.test.js", "ui-chat.test.js"];
+  const suites = ["api.test.js", "rehire.test.js", "chat.test.js", "migrate.test.js", "pwa.test.js", "production.test.js", "e2e.test.js", "ui-chat.test.js"];
   let failed = 0;
   for (const s of suites) {
     console.log(`\n===== ${s} =====`);

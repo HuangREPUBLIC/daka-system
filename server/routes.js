@@ -33,8 +33,8 @@ function cleanPhotos(arr) {
 
 function orderPublic(o) {
   return { id: o.id, season: o.season, createdBy: o.created_by, createdAt: o.created_at,
-    values: o.data.values || {}, logs: o.data.logs || {}, subs: o.data.subs || [],
-    inspections: o.data.inspections || [], followIssues: o.data.followIssues || [] };
+    values: o.data.values || {}, logs: o.data.logs || {}, mainLog: o.data.mainLog || [],
+    subs: o.data.subs || [], inspections: o.data.inspections || [], followIssues: o.data.followIssues || [] };
 }
 function allOrdersPublic() {
   return db.prepare("SELECT * FROM orders").all().map(r => { r.data = JSON.parse(r.data); return orderPublic(r); });
@@ -44,15 +44,18 @@ function logFields() {
   return [...f.order, ...f.production].filter(x => x.type === "log");
 }
 function sectionOfKey(key) {
-  if (/^sub\d+$/.test(key)) return "production";
+  if (key === "mainLog" || key.startsWith("sub:")) return "production";
   const f = getSetting("fields", { order: [], production: [] });
   return f.order.some(x => x.k === key) ? "order" : "production";
 }
 function listForKey(o, key) {
-  if (/^sub\d+$/.test(key)) {
-    const i = +key.slice(3);
-    if (!o.data.subs[i]) return null;
-    return o.data.subs[i].log;
+  if (key === "mainLog") {
+    if (!o.data.mainLog) o.data.mainLog = [];
+    return o.data.mainLog;
+  }
+  if (key.startsWith("sub:")) {
+    const sub = (o.data.subs || []).find(x => x.id === key.slice(4));
+    return sub ? sub.log : null;
   }
   o.data.logs = o.data.logs || {};
   if (!o.data.logs[key]) o.data.logs[key] = [];
@@ -61,14 +64,7 @@ function listForKey(o, key) {
 function emptyOrderData(values) {
   const logs = {};
   logFields().forEach(f => logs[f.k] = []);
-  return {
-    values: values || {}, logs,
-    subs: [{ name: "主厂", factory: (values && values.factory) || "", log: [] },
-           { name: "加工厂2", factory: "", log: [] },
-           { name: "加工厂3", factory: "", log: [] },
-           { name: "加工厂4", factory: "", log: [] }],
-    inspections: [], followIssues: []
-  };
+  return { values: values || {}, logs, mainLog: [], subs: [], inspections: [], followIssues: [] };
 }
 
 /* =========================================================
@@ -316,29 +312,101 @@ router.delete("/orders/:id/logs/:key/:entryId", (req, res) => {
   res.json(orderPublic(loadOrder(o.id)));
 });
 
-router.patch("/orders/:id/subs/:index", (req, res) => {
+// 加工点：下厂员自己决定要不要加、加几个、叫什么名字，不用管理员预先配置下拉
+router.post("/orders/:id/subs", (req, res) => {
   const o = loadOrder(req.params.id);
   if (!o) return res.status(404).json({ error: "订单不存在" });
-  if (!A.canAddLog(req.user, o, "production")) return res.status(403).json({ error: "无权修改" });
-  const i = +req.params.index;
-  if (!o.data.subs[i]) return res.status(400).json({ error: "加工厂不存在" });
-  o.data.subs[i].factory = String((req.body || {}).factory || "");
+  if (!A.canAddLog(req.user, o, "production")) return res.status(403).json({ error: "无权添加加工点" });
+  const name = String((req.body || {}).name || "").trim();
+  if (!name) return res.status(400).json({ error: "请填写加工点名称" });
+  o.data.subs = o.data.subs || [];
+  o.data.subs.push({ id: uid(), name, log: [] });
   saveOrder(o);
   res.json(orderPublic(loadOrder(o.id)));
 });
 
-/* ---------- 验货问题 ---------- */
+router.patch("/orders/:id/subs/:subId", (req, res) => {
+  const o = loadOrder(req.params.id);
+  if (!o) return res.status(404).json({ error: "订单不存在" });
+  if (!A.canAddLog(req.user, o, "production")) return res.status(403).json({ error: "无权修改" });
+  const sub = (o.data.subs || []).find(x => x.id === req.params.subId);
+  if (!sub) return res.status(404).json({ error: "加工点不存在" });
+  const name = String((req.body || {}).name || "").trim();
+  if (!name) return res.status(400).json({ error: "名称不能为空" });
+  sub.name = name; saveOrder(o);
+  res.json(orderPublic(loadOrder(o.id)));
+});
+
+router.delete("/orders/:id/subs/:subId", A.adminRequired, (req, res) => {
+  const o = loadOrder(req.params.id);
+  if (!o) return res.status(404).json({ error: "订单不存在" });
+  const before = (o.data.subs || []).length;
+  o.data.subs = (o.data.subs || []).filter(x => x.id !== req.params.subId);
+  if (o.data.subs.length === before) return res.status(404).json({ error: "加工点不存在" });
+  saveOrder(o);
+  res.json(orderPublic(loadOrder(o.id)));
+});
+
+/* ---------- 验货问题 ----------
+ * 「发现问题」只能业务员/管理员写；「整改情况」只能本单负责下厂员/管理员写。
+ * 业务员验货时一次可以记录当次发现的所有问题（每条一个 item，fix 先留空）；
+ * 下厂员随后逐条填整改情况。不再要求手动选日期，用提交时的服务器时间。
+ */
 router.post("/orders/:id/inspections", (req, res) => {
   const o = loadOrder(req.params.id);
   if (!o) return res.status(404).json({ error: "订单不存在" });
-  const { date, items } = req.body || {};
-  if (!date) return res.status(400).json({ error: "请选择验货日期" });
-  const clean = (items || []).map(x => ({ problem: String(x.problem || "").trim(), fix: String(x.fix || "").trim() }))
-    .filter(x => x.problem || x.fix);
+  if (!A.canWriteInspProblem(req.user)) return res.status(403).json({ error: "只有业务员或管理员可以记录验货发现的问题" });
+  const problems = ((req.body || {}).problems || []).map(x => String(x || "").trim()).filter(Boolean);
   const inspPhotos = cleanPhotos((req.body || {}).photos);
-  if (!clean.length && !inspPhotos.length) return res.status(400).json({ error: "请至少填写一条问题或添加照片" });
-  o.data.inspections.push({ id: uid(), date, by: req.user.id, byName: req.user.name, t: Date.now(),
-    items: clean, photos: inspPhotos });
+  if (!problems.length && !inspPhotos.length) return res.status(400).json({ error: "请至少填写一条发现的问题或添加照片" });
+  const now = Date.now();
+  const items = problems.map(p => ({
+    id: uid(), problem: p, problemBy: req.user.id, problemByName: req.user.name, problemAt: now,
+    fix: "", fixBy: null, fixByName: "", fixAt: null, notes: []
+  }));
+  o.data.inspections.push({ id: uid(), t: now, by: req.user.id, byName: req.user.name, photos: inspPhotos, items });
+  saveOrder(o);
+  res.json(orderPublic(loadOrder(o.id)));
+});
+
+// 改某一条的「发现问题」或「整改情况」——两个字段各自独立校验权限，传哪个改哪个
+router.patch("/orders/:id/inspections/:instId/items/:itemId", (req, res) => {
+  const o = loadOrder(req.params.id);
+  if (!o) return res.status(404).json({ error: "订单不存在" });
+  const batch = o.data.inspections.find(x => x.id === req.params.instId);
+  const item = batch && batch.items.find(x => x.id === req.params.itemId);
+  if (!item) return res.status(404).json({ error: "记录不存在" });
+  const body = req.body || {};
+  let touched = false;
+  if (body.problem !== undefined) {
+    if (!A.canWriteInspProblem(req.user)) return res.status(403).json({ error: "只有业务员或管理员可以修改发现的问题" });
+    const v = String(body.problem).trim();
+    if (!v) return res.status(400).json({ error: "发现的问题不能为空" });
+    item.problem = v; item.problemBy = req.user.id; item.problemByName = req.user.name; item.problemAt = Date.now();
+    touched = true;
+  }
+  if (body.fix !== undefined) {
+    if (!A.canWriteInspFix(req.user, o)) return res.status(403).json({ error: "只有本单负责下厂员或管理员可以填写整改情况" });
+    item.fix = String(body.fix).trim(); item.fixBy = req.user.id; item.fixByName = req.user.name; item.fixAt = Date.now();
+    touched = true;
+  }
+  if (!touched) return res.status(400).json({ error: "没有可修改的内容" });
+  saveOrder(o);
+  res.json(orderPublic(loadOrder(o.id)));
+});
+
+// 补充说明：漏填/需要补充时，双方（发现问题方或整改方）都能加一条，不覆盖原内容
+router.post("/orders/:id/inspections/:instId/items/:itemId/notes", (req, res) => {
+  const o = loadOrder(req.params.id);
+  if (!o) return res.status(404).json({ error: "订单不存在" });
+  const batch = o.data.inspections.find(x => x.id === req.params.instId);
+  const item = batch && batch.items.find(x => x.id === req.params.itemId);
+  if (!item) return res.status(404).json({ error: "记录不存在" });
+  if (!A.canWriteInspProblem(req.user) && !A.canWriteInspFix(req.user, o)) return res.status(403).json({ error: "无权添加补充说明" });
+  const text = String((req.body || {}).text || "").trim();
+  if (!text) return res.status(400).json({ error: "请填写补充说明" });
+  item.notes = item.notes || [];
+  item.notes.push({ id: uid(), by: req.user.id, byName: req.user.name, t: Date.now(), text });
   saveOrder(o);
   res.json(orderPublic(loadOrder(o.id)));
 });
@@ -348,7 +416,7 @@ router.delete("/orders/:id/inspections/:inspId", (req, res) => {
   if (!o) return res.status(404).json({ error: "订单不存在" });
   const g = o.data.inspections.find(x => x.id === req.params.inspId);
   if (!g) return res.status(404).json({ error: "记录不存在" });
-  if (!(req.user.role === "admin" || g.by === req.user.id)) return res.status(403).json({ error: "只能删除自己的验货记录" });
+  if (!(req.user.role === "admin" || g.by === req.user.id)) return res.status(403).json({ error: "只能删除自己创建的验货记录" });
   o.data.inspections = o.data.inspections.filter(x => x.id !== g.id); saveOrder(o);
   res.json(orderPublic(loadOrder(o.id)));
 });
@@ -487,15 +555,22 @@ router.get("/users/:id/logs", (req, res) => {
     logFs.forEach(f => (o.logs[f.k] || []).forEach(e => {
       if (e.by === targetId) rows.push(Object.assign({ label: f.label, text: e.text, t: e.t }, tag));
     }));
+    (o.mainLog || []).forEach(e => {
+      if (e.by === targetId) rows.push(Object.assign({ label: "主厂", text: e.text, t: e.t }, tag));
+    });
     (o.subs || []).forEach(sub => sub.log.forEach(e => {
-      if (e.by === targetId) rows.push(Object.assign({ label: "加工厂·" + (sub.factory || sub.name), text: e.text, t: e.t }, tag));
+      if (e.by === targetId) rows.push(Object.assign({ label: "生产进度·" + sub.name, text: e.text, t: e.t }, tag));
     }));
     o.followIssues.forEach(e => {
-      if (e.by === targetId) rows.push(Object.assign({ label: "跟单问题", text: e.text, t: e.t }, tag));
+      if (e.by === targetId) rows.push(Object.assign({ label: "跟单小结", text: e.text, t: e.t }, tag));
     });
-    o.inspections.forEach(g => {
-      if (g.by === targetId) rows.push(Object.assign({ label: "验货记录", text: g.items.map(i => i.problem).join("；"), t: g.t }, tag));
-    });
+    o.inspections.forEach(g => (g.items || []).forEach(it => {
+      if (it.problemBy === targetId) rows.push(Object.assign({ label: "验货·发现问题", text: it.problem, t: it.problemAt }, tag));
+      if (it.fixBy === targetId) rows.push(Object.assign({ label: "验货·整改情况", text: it.fix, t: it.fixAt }, tag));
+      (it.notes || []).forEach(n => {
+        if (n.by === targetId) rows.push(Object.assign({ label: "验货·补充说明", text: n.text, t: n.t }, tag));
+      });
+    }));
   });
   rows.sort((a, b) => b.t - a.t);
   res.json(rows);

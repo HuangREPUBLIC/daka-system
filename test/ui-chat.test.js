@@ -137,6 +137,57 @@ async function apiAs(phone, method, p, body) {
   window.A.closeLightbox(); ok(!doc.getElementById("lightbox"), "大图可关闭");
   window.eval("photoDraft = {}");
 
+  // ---- 生产进度/验货问题/头部/高亮 等新版界面 ----
+  A.forceLogout(); await sleep(150);
+  doc.getElementById("lg-phone").value = "13800000000"; doc.getElementById("lg-pass").value = "123456";
+  await A.login(); await sleep(400);
+  const o1 = st().orders.find(o => o.values.styleNo === "SS27-T012");
+  window.go("detail", o1.id); await sleep(500);
+  ok(app().includes('class="cat-title"') && app().includes("一、订单明细") && app().includes("四、跟单小结"), "四大类标题都带高亮 class");
+  ok(app().includes("女装印花短袖T恤 圆领短袖"), "头部把款式名+款式合并显示");
+  ok(app().includes('class="header-thumb"') || !app().includes("暂无照片"), "头部区域渲染不报错");
+  ok(app().includes("生产进度") && !app().includes("加工厂明细"), "「加工厂明细」已改名「生产进度」");
+  ok(app().includes(">主厂<") && app().includes(o1.values.factory), "主厂名称自动带入订单生产厂字段");
+  ok(!app().includes("验货日期"), "验货问题不再要求选日期");
+  ok(app().includes("发货日期") && app().indexOf("包装进度") < app().indexOf("发货日期"), "发货日期排在包装进度后面");
+
+  // 动态加工点：新增 -> 改名 -> 打卡
+  await A.addSubPrompt(o1.id); await sleep(100);
+  doc.getElementById("m-input").value = "新加工点X";
+  await A.modalOk(); await sleep(400);
+  const newSub = st().orders.find(o => o.id === o1.id).subs.find(s => s.name === "新加工点X");
+  ok(!!newSub, "新增加工点成功，名字是自己填的");
+  window.go("detail", o1.id); await sleep(300);
+  ok(app().includes("新加工点X"), "新加工点显示在生产进度里");
+
+  // 验货：业务员创建「发现问题」，本单下厂员填「整改情况」，双方都不能越权
+  window.go("detail", o1.id); await sleep(300);
+  ok(app().includes("＋ 新增") && app().includes("三、验货问题"), "管理员(等同业务员权限)能看到验货新增入口");
+  A.forceLogout(); await sleep(150);
+  doc.getElementById("lg-phone").value = "13811112222"; doc.getElementById("lg-pass").value = "123456"; // 陈晓芳(sales)
+  await A.login(); await sleep(400);
+  window.go("detail", o1.id); await sleep(400);
+  ok(app().includes("＋ 新增"), "业务员能看到验货新增入口");
+  A.toggleAdd("insp"); await sleep(100);
+  doc.getElementById("insp-items").querySelector(".insp-p").value = "UI测试-发现的新问题";
+  await A.saveInsp(o1.id); await sleep(500);
+  ok(app().includes("UI测试-发现的新问题"), "业务员通过界面创建的验货问题显示出来");
+  ok(app().includes("待整改"), "新建的问题整改情况显示「待整改」");
+  ok(!app().includes('onclick="A.editInspFix'), "业务员看不到「填写整改」链接(无权限)");
+
+  A.forceLogout(); await sleep(150);
+  doc.getElementById("lg-phone").value = "13855556666"; doc.getElementById("lg-pass").value = "123456"; // 王建国(follower, 负责o1)
+  await A.login(); await sleep(400);
+  window.go("detail", o1.id); await sleep(400);
+  ok(!app().includes("＋ 新增") || !app().includes("三、验货问题</span><button"), "下厂员看不到验货「新增」入口");
+  const newItem = st().orders.find(o => o.id === o1.id).inspections.flatMap(g => g.items).find(i => i.problem === "UI测试-发现的新问题");
+  ok(!!newItem, "下厂员能看到业务员刚创建的问题");
+  A.editInspFix(o1.id, st().orders.find(o => o.id === o1.id).inspections.find(g => g.items.some(i => i.id === newItem.id)).id, newItem.id);
+  await sleep(150);
+  doc.getElementById("m-input").value = "UI测试-已整改";
+  await A.modalOk(); await sleep(500);
+  ok(app().includes("UI测试-已整改"), "下厂员通过界面填写的整改情况显示出来");
+
   window.go("account"); await sleep(600);
   ok(!app().includes("不点退出的话"), "已移除登录状态说明文字");
   ok(!app().includes("服装生产进度") && !app().includes("一对一私聊")

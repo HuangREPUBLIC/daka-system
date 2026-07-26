@@ -91,7 +91,28 @@ function ensureDefaults() {
     setSetting("roles", DEFAULT_ROLES);
     console.log("[db] 已为现有数据库补齐职位配置");
   }
-  if (!getSetting("fields", null)) console.warn("[db] 警告：缺少字段配置");
+  const factories = getSetting("factories", null);
+  if (factories && !factories.fabric) {
+    factories.fabric = [];
+    setSetting("factories", factories);
+    console.log("[db] 已为现有数据库补齐面料工厂配置");
+  }
+  // 老库把「面料」文本字段换成「面料工厂」下拉（插在绣印工厂前面），不影响其它自定义字段
+  const fields = getSetting("fields", null);
+  if (fields && fields.order) {
+    const hasOldFabric = fields.order.some(f => f.k === "fabric");
+    const hasFabricFactory = fields.order.some(f => f.k === "fabricFactory");
+    if (hasOldFabric && !hasFabricFactory) {
+      fields.order = fields.order.filter(f => f.k !== "fabric");
+      const embIdx = fields.order.findIndex(f => f.k === "embFactory");
+      const newField = { k: "fabricFactory", label: "面料工厂", type: "factory-fabric" };
+      if (embIdx >= 0) fields.order.splice(embIdx, 0, newField); else fields.order.push(newField);
+      setSetting("fields", fields);
+      console.log("[db] 已将「面料」字段迁移为「面料工厂」下拉");
+    }
+  } else if (!fields) {
+    console.warn("[db] 警告：缺少字段配置");
+  }
 }
 
 /* ---------- 首次运行填充演示数据 ---------- */
@@ -116,9 +137,9 @@ function seedIfEmpty() {
   // 职位：label 可自由命名，template 决定权限（sales=业务员权限，follower=下厂员权限）
   setSetting("roles", DEFAULT_ROLES);
   setSetting("factories", {
+    fabric: ["恒信面料行", "锦源纺织"],
     emb: ["锦绣绣花厂", "华艺印花厂", "美达绣印"],
-    prod: ["宏发制衣厂", "联诚服装厂", "永盛制衣"],
-    proc: ["宏发制衣厂", "联诚服装厂", "永盛制衣", "新星加工厂", "汇丰加工厂"]
+    prod: ["宏发制衣厂", "联诚服装厂", "永盛制衣"]
   });
   setSetting("fields", {
     order: [
@@ -130,9 +151,9 @@ function seedIfEmpty() {
       { k: "qty", label: "数量", type: "number" },
       { k: "desc", label: "款式描述", type: "textarea" },
       { k: "deadline", label: "订单交期", type: "date" },
-      { k: "fabric", label: "面料", type: "text" },
       { k: "fabricProg", label: "面料进度", type: "log" },
       { k: "embProg", label: "绣印进度", type: "log" },
+      { k: "fabricFactory", label: "面料工厂", type: "factory-fabric" },
       { k: "embFactory", label: "绣印工厂", type: "factory-emb" }
     ],
     production: [
@@ -149,45 +170,47 @@ function seedIfEmpty() {
   const T = (d, h, m) => new Date(2026, 6, d, h, m).getTime();
   const L = (by, d, h, m, text) => ({ id: uid(), by, byName: nameOf[by], t: T(d, h, m), text });
   const emptyLogs = () => ({ fabricProg: [], embProg: [], preSample: [], cutting: [], ironing: [], packing: [] });
-  const insertOrder = (season, createdBy, values, logs, subs, inspections, followIssues) => {
+  // insp: 每次验货只由业务员创建"发现问题"，下厂员后续单独填"整改情况"
+  const insp = (problemer, d, h, m, pairs) => ({
+    id: uid(), t: T(d, h, m), by: problemer, byName: nameOf[problemer], photos: [],
+    items: pairs.map(([fixer, problem, fix]) => ({
+      id: uid(), problem, problemBy: problemer, problemByName: nameOf[problemer], problemAt: T(d, h, m),
+      fix: fix || "", fixBy: fix ? fixer : null, fixByName: fix ? nameOf[fixer] : "",
+      fixAt: fix ? T(d, h, m + 30) : null, notes: []
+    }))
+  });
+  const insertOrder = (season, createdBy, values, logs, mainLog, subs, inspections, followIssues) => {
     db.prepare("INSERT INTO orders(id,season,created_by,created_at,updated_at,data) VALUES(?,?,?,?,?,?)")
       .run(uid(), season, createdBy, T(1, 9, 0), now,
-        JSON.stringify({ values, logs: Object.assign(emptyLogs(), logs), subs, inspections, followIssues }));
+        JSON.stringify({ values, logs: Object.assign(emptyLogs(), logs), mainLog, subs, inspections, followIssues }));
   };
 
   insertOrder("SS2027", s1,
     { sales: s1, styleNo: "SS27-T012", styleName: "女装印花短袖T恤", style: "圆领短袖", qty: "3200",
-      desc: "32支精梳棉，前胸水浆印花，领口撞色包边", deadline: "2026-08-15", fabric: "32支精梳棉汗布 180g",
+      desc: "32支精梳棉，前胸水浆印花，领口撞色包边", deadline: "2026-08-15", fabricFactory: "恒信面料行",
       embFactory: "华艺印花厂", follower: f1, factory: "宏发制衣厂", shipDate: "" },
     { fabricProg: [L(s1, 8, 10, 20, "面料已下机染色，预计12日到仓"), L(f1, 13, 9, 5, "面料到仓 2860kg，已验布，色差合格")],
       embProg: [L(f1, 15, 14, 30, "印花版已确认，16日上机")],
       preSample: [L(f1, 5, 16, 0, "产前样已寄客户，等确认意见")],
       cutting: [L(f1, 17, 8, 40, "已开裁，2张裁床，预计19日裁完"), L(f1, 19, 17, 10, "裁剪完成，共3250件裁片，含备损")] },
-    [ { name: "主厂", factory: "宏发制衣厂", log: [L(f1, 19, 17, 30, "车缝上线2条，日产约400件")] },
-      { name: "加工厂2", factory: "新星加工厂", log: [] },
-      { name: "加工厂3", factory: "", log: [] },
-      { name: "加工厂4", factory: "", log: [] } ],
-    [ { id: uid(), date: "2026-07-18", by: f1, byName: "王建国", t: T(18, 15, 0),
-        items: [{ problem: "首件肩缝有轻微起皱", fix: "已调整缝纫机张力，返修3件后正常" }] } ],
-    [ { id: uid(), by: s1, byName: "陈晓芳", t: T(16, 11, 20), text: "客户要求包装改用平铺装，每箱40件，已通知工厂" } ]
+    [L(f1, 19, 17, 30, "车缝上线2条，日产约400件")],
+    [ { id: uid(), name: "加工点1（新星印花厂）", log: [L(f1, 18, 9, 0, "外发印花 800件，预计20日回厂")] } ],
+    [ insp(s1, 18, 15, 0, [[f1, "首件肩缝有轻微起皱", "已调整缝纫机张力，返修3件后正常"]]) ],
+    [ { id: uid(), by: s1, byName: "陈晓芳", t: T(16, 11, 20), text: "客户要求包装改用平铺装，每箱40件，已通知工厂", photos: [] } ]
   );
 
   insertOrder("SS2027", s2,
     { sales: s2, styleNo: "SS27-D031", styleName: "碎花吊带连衣裙", style: "连衣裙", qty: "1800",
-      desc: "全棉印花梭织布，腰部松紧，裙摆压褶", deadline: "2026-08-28", fabric: "全棉60支印花梭织布",
+      desc: "全棉印花梭织布，腰部松紧，裙摆压褶", deadline: "2026-08-28", fabricFactory: "锦源纺织",
       embFactory: "美达绣印", follower: f2, factory: "联诚服装厂", shipDate: "" },
     { fabricProg: [L(s2, 14, 9, 30, "坯布已进印花厂，预计20日出成品布")],
       preSample: [L(f2, 17, 10, 15, "产前样制作中，预计21日完成")] },
-    [ { name: "主厂", factory: "联诚服装厂", log: [] },
-      { name: "加工厂2", factory: "", log: [] },
-      { name: "加工厂3", factory: "", log: [] },
-      { name: "加工厂4", factory: "", log: [] } ],
-    [], []
+    [], [], [], []
   );
 
   insertOrder("FW2026", s1,
     { sales: s1, styleNo: "FW26-J105", styleName: "男装连帽夹克", style: "夹克外套", qty: "2600",
-      desc: "尼龙面料防泼水，前胸绣花logo，双层帽", deadline: "2026-07-30", fabric: "300T尼龙桃皮绒",
+      desc: "尼龙面料防泼水，前胸绣花logo，双层帽", deadline: "2026-07-30", fabricFactory: "恒信面料行",
       embFactory: "锦绣绣花厂", follower: f1, factory: "永盛制衣", shipDate: "2026-07-28" },
     { fabricProg: [L(s1, 1, 10, 0, "面料6月28日已全部到仓")],
       embProg: [L(f1, 3, 15, 0, "绣花片已回厂，数量核对无误")],
@@ -195,14 +218,13 @@ function seedIfEmpty() {
       cutting: [L(f1, 6, 8, 30, "裁剪完成")],
       ironing: [L(f1, 16, 14, 0, "大烫进行中，已完成约60%"), L(f1, 19, 16, 40, "整烫全部完成")],
       packing: [L(f1, 19, 18, 0, "开始包装，预计22日完成，每箱30件")] },
-    [ { name: "主厂", factory: "永盛制衣", log: [L(f1, 10, 9, 0, "车缝完成，尾查中")] },
-      { name: "加工厂2", factory: "汇丰加工厂", log: [L(f1, 8, 9, 0, "加工厂800件已完成回厂")] },
-      { name: "加工厂3", factory: "", log: [] },
-      { name: "加工厂4", factory: "", log: [] } ],
-    [ { id: uid(), date: "2026-07-12", by: f1, byName: "王建国", t: T(12, 14, 0),
-        items: [ { problem: "拉链头个别拉合不顺", fix: "供应商已换新拉链头，全检更换" },
-                 { problem: "帽绳长短不一约20件", fix: "已返工统一长度" } ] } ],
-    [ { id: uid(), by: boss, byName: "老板", t: T(13, 8, 50), text: "此单交期紧，包装完成后立即安排出货，物流已订" } ]
+    [L(f1, 10, 9, 0, "车缝完成，尾查中")],
+    [ { id: uid(), name: "加工点1（汇丰加工厂）", log: [L(f1, 8, 9, 0, "800件已完成回厂")] } ],
+    [ insp(s1, 12, 14, 0, [
+        [f1, "拉链头个别拉合不顺", "供应商已换新拉链头，全检更换"],
+        [f1, "帽绳长短不一约20件", "已返工统一长度"]
+      ]) ],
+    [ { id: uid(), by: boss, byName: "老板", t: T(13, 8, 50), text: "此单交期紧，包装完成后立即安排出货，物流已订", photos: [] } ]
   );
 
   console.log("[db] 已填充演示数据（管理员 13800000000 / 密码 123456）");

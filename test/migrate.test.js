@@ -40,6 +40,26 @@ r = spawnSync(process.execPath, ["-e", `
 `], { encoding: "utf8", env: Object.assign({}, process.env, { DATA_DIR }) });
 ok(r.stdout.includes("跟单主管"), "已有职位配置不会被覆盖");
 
+// 4) 老库的「面料」文本字段要能自动换成「面料工厂」下拉，且不影响管理员自己加的字段
+r = spawnSync(process.execPath, ["-e", `
+  process.env.DATA_DIR = ${JSON.stringify(DATA_DIR)};
+  const d = require(${JSON.stringify(dbPath)});
+  d.seedIfEmpty();
+  const fields = d.getSetting("fields", { order: [], production: [] });
+  fields.order = fields.order.filter(f => f.k !== "fabricFactory");
+  fields.order.splice(fields.order.findIndex(f => f.k === "embFactory"), 0, { k: "fabric", label: "面料", type: "text" });
+  fields.order.push({ k: "custom1", label: "管理员自定义字段", type: "text" });
+  d.setSetting("fields", fields);
+  d.ensureDefaults();
+  const after = d.getSetting("fields", { order: [] }).order;
+  console.log(JSON.stringify(after.map(f => f.k)));
+`], { encoding: "utf8", env: Object.assign({}, process.env, { DATA_DIR }) });
+const migrated = (r.stdout.trim().split("\n").pop() || "");
+ok(r.status === 0 && migrated.includes("fabricFactory") && !migrated.includes('"fabric"'), "老库「面料」自动换成「面料工厂」");
+ok(migrated.includes("custom1"), "迁移过程不影响管理员自己加的字段");
+const keys = JSON.parse(migrated);
+ok(keys.indexOf("fabricFactory") < keys.indexOf("embFactory"), "面料工厂排在绣印工厂前面");
+
 fs.rmSync(DATA_DIR, { recursive: true, force: true });
 console.log(`\n结果：PASS ${pass}, FAIL ${fail}`);
 process.exit(fail ? 1 : 0);

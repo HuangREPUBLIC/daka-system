@@ -96,8 +96,14 @@ function canAddLog(u, order, section) {
 // 能否修改/删除某条记录：管理员或本人
 const canTouchEntry = (u, entry) => u && (u.role === "admin" || entry.by === u.id);
 
+// 验货「发现问题」：只有业务员（或管理员）能写，不要求是本单的业务员——
+// 质检可能是任何业务员做的，跟下厂员打卡限定在"自己负责的订单"不是一回事。
+const canWriteInspProblem = (u) => u && (u.role === "admin" || templateOf(u) === "sales");
+// 验货「整改情况」：只有本单负责下厂员（或管理员）能写，跟生产明细打卡权限一致。
+const canWriteInspFix = (u, order) => canAddLog(u, order, "production");
+
 module.exports = {
   hashPassword, verifyPassword, signToken, userPublic, userById,
   authRequired, adminRequired, isAdmin, canEditBasic, canAddLog, canTouchEntry,
-  roleTemplate, templateOf, roleLabel
+  roleTemplate, templateOf, roleLabel, canWriteInspProblem, canWriteInspFix
 };

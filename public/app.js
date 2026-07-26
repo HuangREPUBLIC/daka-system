@@ -119,11 +119,15 @@ function canAddLog(o, section) {
   return false;
 }
 const canTouchEntry = e => { const m = me(); return m && (m.template === "admin" || e.by === m.id); };
+// 验货「发现问题」只有业务员/管理员能写；「整改情况」只有本单负责下厂员/管理员能写
+const canWriteInspProblem = () => { const m = me(); return m && (m.template === "admin" || m.template === "sales"); };
+const canWriteInspFix = o => canAddLog(o, "production");
 
 /* ================= 字段与下拉 ================= */
 function optionsFor(f) {
   if (f.type === "user-sales") return state.users.filter(u => u.template === "sales").map(u => [u.id, u.name]);
   if (f.type === "user-follower") return state.users.filter(u => u.template === "follower").map(u => [u.id, u.name]);
+  if (f.type === "factory-fabric") return state.factories.fabric.map(x => [x, x]);
   if (f.type === "factory-emb") return state.factories.emb.map(x => [x, x]);
   if (f.type === "factory-prod") return state.factories.prod.map(x => [x, x]);
   if (f.type === "select") return (f.options || []).map(x => [x, x]);
@@ -482,101 +486,133 @@ function importPreviewHtml() {
 }
 
 /* ---------- 订单详情 ---------- */
+// 一条打卡记录的展示（改/删链接 + 文字 + 照片），主厂/加工点/普通进度字段共用
+function logEntriesHtml(list, oid, key) {
+  const entries = (list || []).slice().sort((a, b) => b.t - a.t);
+  if (!entries.length) return `<div class="empty" style="padding:8px 0">暂无打卡记录</div>`;
+  return `<ul class="log">${entries.map(e => `<li>
+    <div class="meta"><b>${esc(e.byName)}</b><span class="num">${fmtT(e.t)}</span>
+      ${canTouchEntry(e) ? `<a href="javascript:void(0)" onclick="A.editLog('${oid}','${key}','${e.id}')">改</a>
+      <a href="javascript:void(0)" onclick="A.delLog('${oid}','${key}','${e.id}')">删</a>` : ""}</div>
+    ${e.text ? `<div class="txt">${esc(e.text)}</div>` : ""}${photoGallery(e.photos)}</li>`).join("")}</ul>`;
+}
 function logFieldHtml(o, f, list, addKey, canAdd) {
-  const entries = list.slice().sort((a, b) => b.t - a.t);
   return `<div class="logfield">
-    <div class="lf-head"><span>${esc(f.label)}</span><span class="cnt">${entries.length} 条</span>
+    <div class="lf-head"><span>${esc(f.label)}</span><span class="cnt">${(list || []).length} 条</span>
       ${canAdd ? `<button class="btn mini right" onclick="A.toggleAdd('${addKey}')">＋ 打卡</button>` : ""}</div>
     ${canAdd ? `<div class="addbox" id="add-${addKey}">
       <textarea class="in" id="txt-${addKey}" placeholder="填写当前进度情况，可详细描述…"></textarea>
       ${photoPicker("log:" + addKey)}
       <div style="margin-top:8px"><button class="btn mini" onclick="A.addLog('${o.id}','${addKey}')">提交打卡</button></div></div>` : ""}
-    ${entries.length ? `<ul class="log">${entries.map(e => `<li>
-      <div class="meta"><b>${esc(e.byName)}</b><span class="num">${fmtT(e.t)}</span>
-        ${canTouchEntry(e) ? `<a href="javascript:void(0)" onclick="A.editLog('${o.id}','${addKey}','${e.id}')">改</a>
-        <a href="javascript:void(0)" onclick="A.delLog('${o.id}','${addKey}','${e.id}')">删</a>` : ""}</div>
-      ${e.text ? `<div class="txt">${esc(e.text)}</div>` : ""}${photoGallery(e.photos)}</li>`).join("")}</ul>` : `<div class="empty" style="padding:10px 0">暂无打卡记录</div>`}</div>`;
+    ${logEntriesHtml(list, o.id, addKey)}</div>`;
+}
+// 一个动态"加工点"卡片：可改名、可打卡、管理员可删除
+function subCardHtml(o, s, canProdLog) {
+  const key = "sub:" + s.id;
+  return `<div style="margin-top:10px;border-top:.5px solid var(--line);padding-top:10px">
+    <div class="lf-head" style="font-size:14.5px">
+      <span>${esc(s.name)}</span>
+      ${canProdLog ? `<a href="javascript:void(0)" onclick="A.renameSub('${o.id}','${s.id}')" style="font-size:12.5px">改名</a>` : ""}
+      ${canProdLog ? `<button class="btn mini right" onclick="A.toggleAdd('${key}')">＋ 打卡</button>` : ""}
+      ${isAdmin() ? `<a href="javascript:void(0)" onclick="A.delSub('${o.id}','${s.id}')" style="color:var(--bad);font-size:12.5px;margin-left:10px">删除</a>` : ""}
+    </div>
+    ${canProdLog ? `<div class="addbox" id="add-${key}"><textarea class="in" id="txt-${key}" placeholder="该加工点的进度情况…"></textarea>
+      ${photoPicker("log:" + key)}
+      <div style="margin-top:8px"><button class="btn mini" onclick="A.addLog('${o.id}','${key}')">提交打卡</button></div></div>` : ""}
+    ${logEntriesHtml(s.log, o.id, key)}</div>`;
+}
+// 验货：一条"发现问题/整改情况"的展示（两个字段各自独立可编辑）
+function inspItemHtml(o, g, it, canInsp, canFix) {
+  return `<div class="insp-item">
+    <div><span class="lbl p">发现问题</span>${esc(it.problem)}
+      ${canInsp ? `<a href="javascript:void(0)" onclick="A.editInspProblem('${o.id}','${g.id}','${it.id}')" style="margin-left:6px;font-size:12.5px">改</a>` : ""}</div>
+    <div style="margin-top:4px"><span class="lbl f2">整改情况</span>${it.fix ? esc(it.fix) : `<span style="color:var(--ink-2)">待整改</span>`}
+      ${canFix ? `<a href="javascript:void(0)" onclick="A.editInspFix('${o.id}','${g.id}','${it.id}')" style="margin-left:6px;font-size:12.5px">${it.fix ? "改" : "填写"}</a>` : ""}</div>
+    ${(it.notes || []).length ? it.notes.map(n => `<div style="margin-top:4px;font-size:12.5px;color:var(--ink-2)">补充说明（${esc(n.byName)} · ${fmtT(n.t)}）：${esc(n.text)}</div>`).join("") : ""}
+    ${(canInsp || canFix) ? `<a href="javascript:void(0)" onclick="A.addInspNote('${o.id}','${g.id}','${it.id}')" style="font-size:12.5px">＋ 补充说明</a>` : ""}
+  </div>`;
+}
+function inspBatchHtml(o, g, canInsp, canFix) {
+  return `<div class="insp-day">
+    <div class="lf-head"><span style="font-weight:400;color:var(--ink-2);font-size:12.5px">${esc(g.byName)} · <span class="num">${fmtT(g.t)}</span></span>
+      ${(isAdmin() || g.by === me().id) ? `<button class="btn plain right" style="color:var(--bad)" onclick="A.delInsp('${o.id}','${g.id}')">删除</button>` : ""}</div>
+    ${g.items.map(it => inspItemHtml(o, g, it, canInsp, canFix)).join("")}${photoGallery(g.photos)}</div>`;
 }
 function vDetail() {
   const o = state.orders.find(x => x.id === route.id);
   if (!o) return `<div class="card"><div class="empty">订单不存在</div></div>`;
   const scalars = s => state.fields[s].filter(f => f.type !== "log");
   const logsOf = s => state.fields[s].filter(f => f.type === "log");
-  const kv = fs => fs.map(f => {
-    if (f.type === "image") {
-      const g = photoGallery(o.values.img);
-      return `<div class="row-item col"><div class="row-label">${esc(f.label)}</div>${g || `<div class="row-sub">暂无照片</div>`}</div>`;
-    }
-    return `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
-      <div class="row-value">${esc(displayVal(o, f)) || "—"}</div></div>`;
-  }).join("");
+  const kv = fs => fs.map(f => `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
+      <div class="row-value">${esc(displayVal(o, f)) || "—"}</div></div>`).join("");
   const canB = canEditBasic(o), canOrdLog = canAddLog(o, "order"), canProdLog = canAddLog(o, "production");
+  const canInsp = canWriteInspProblem(), canFix = canWriteInspFix(o);
   const editForm = s => `<div class="grid2">${scalars(s).map(f => fieldRow(f, o.values[f.k] || "")).join("")}</div>`;
+  const photos = normalizePhotos(o.values.img);
+  const headerThumb = photos.length ? `<img src="${esc(photos[0])}" alt="款式图" class="header-thumb"
+    data-gallery='${JSON.stringify(photos)}' data-i="0" onclick="A.lightboxFromEl(this)">` : "";
+  const shipDateField = state.fields.production.find(f => f.k === "shipDate");
+  const topProdScalars = scalars("production").filter(f => f.k !== "shipDate");
+  const orderKvFields = scalars("order").filter(f => f.type !== "image");
 
   return `<section class="group">
-    <div class="card"><div class="card-pad" style="text-align:center">
-      <div style="font-size:20px;font-weight:700;letter-spacing:-.02em">${esc(o.values.styleNo || "")}</div>
-      <div style="color:var(--ink-2);margin-top:2px">${esc(o.values.styleName || "")}</div>
-      <div style="margin-top:8px"><span class="tag">${esc(o.season)}</span></div>
+    <div class="card"><div class="card-pad" style="display:flex;align-items:center;gap:14px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:20px;font-weight:700;letter-spacing:-.02em">${esc(o.values.styleNo || "")}</div>
+        <div style="color:var(--ink-2);margin-top:2px">${esc([o.values.styleName, o.values.style].filter(Boolean).join(" "))}</div>
+        <div style="margin-top:8px"><span class="tag">${esc(o.season)}</span></div>
+      </div>
+      ${headerThumb}
     </div></div></section>
 
   <section class="group">
-    <div class="group-title">一、订单明细${canB ? `<button class="btn mini ghost right" onclick="A.toggleBasic()">${editingBasic ? "取消" : "编辑"}</button>` : ""}</div>
+    <div class="group-title"><span class="cat-title">一、订单明细</span>${canB ? `<button class="btn mini ghost right" onclick="A.toggleBasic()">${editingBasic ? "取消" : "编辑"}</button>` : ""}</div>
     <div class="card">${editingBasic && canB
       ? `<label class="field"><span>订单季节</span>${seasonSelectHtml(o.season)}</label>${editForm("order")}
          <div class="group-title" style="padding-top:12px">生产安排字段</div>${editForm("production")}
          <div class="btn-row"><button class="btn" onclick="A.saveBasic('${o.id}')">保存修改</button></div>`
-      : kv(scalars("order"))}</div>
+      : kv(orderKvFields)}</div>
     <div class="card" style="margin-top:14px">${logsOf("order").map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canOrdLog)).join("")}</div>
   </section>
 
   <section class="group">
-    <div class="group-title">二、生产明细${o.values.follower ? ` · 负责人 ${esc(uname(o.values.follower))}` : " · 未指定下厂员"}</div>
-    <div class="card">${kv(scalars("production"))}</div>
+    <div class="group-title"><span class="cat-title">二、生产明细</span>
+      <span style="margin-left:8px;font-size:12.5px;color:var(--ink-2)">${o.values.follower ? `负责人 ${esc(uname(o.values.follower))}` : "未指定下厂员"}</span></div>
+    <div class="card">${kv(topProdScalars)}</div>
     <div class="card" style="margin-top:14px">
       ${logsOf("production").filter(f => ["preSample", "cutting"].includes(f.k)).map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canProdLog)).join("")}
-      <div class="logfield"><div class="lf-head"><span>加工厂明细</span></div>
-        ${(o.subs || []).map((s, i) => `<div style="margin-top:10px;border-top:.5px solid var(--line);padding-top:10px">
-          <div class="lf-head" style="font-size:14.5px"><span>${esc(s.name)}</span>
-            ${canProdLog ? `<select class="in" style="width:auto;min-height:34px;padding:4px 30px 4px 10px;font-size:14px" onchange="A.setSubFactory('${o.id}',${i},this.value)">
-              <option value="">选择工厂</option>${state.factories.proc.map(x => `<option ${x === s.factory ? "selected" : ""}>${esc(x)}</option>`).join("")}</select>`
-              : `<span class="tag role">${esc(s.factory) || "未指定"}</span>`}
-            ${canProdLog ? `<button class="btn mini right" onclick="A.toggleAdd('sub${i}')">＋ 打卡</button>` : ""}</div>
-          ${canProdLog ? `<div class="addbox" id="add-sub${i}"><textarea class="in" id="txt-sub${i}" placeholder="该加工厂的进度情况…"></textarea>
-            ${photoPicker("log:sub" + i)}
-            <div style="margin-top:8px"><button class="btn mini" onclick="A.addLog('${o.id}','sub${i}')">提交打卡</button></div></div>` : ""}
-          ${s.log.length ? `<ul class="log">${s.log.slice().sort((a, b) => b.t - a.t).map(e => `<li>
-            <div class="meta"><b>${esc(e.byName)}</b><span class="num">${fmtT(e.t)}</span>${canTouchEntry(e) ?
-              `<a href="javascript:void(0)" onclick="A.editLog('${o.id}','sub${i}','${e.id}')">改</a>
-               <a href="javascript:void(0)" onclick="A.delLog('${o.id}','sub${i}','${e.id}')">删</a>` : ""}</div>
-            ${e.text ? `<div class="txt">${esc(e.text)}</div>` : ""}${photoGallery(e.photos)}</li>`).join("")}</ul>` : `<div class="empty" style="padding:8px 0">暂无打卡记录</div>`}</div>`).join("")}
+      <div class="logfield"><div class="lf-head"><span>生产进度</span></div>
+        <div style="margin-top:10px;border-top:.5px solid var(--line);padding-top:10px">
+          <div class="lf-head" style="font-size:14.5px"><span>主厂</span>
+            <span class="tag role">${esc(o.values.factory) || "未指定"}</span>
+            ${canProdLog ? `<button class="btn mini right" onclick="A.toggleAdd('mainLog')">＋ 打卡</button>` : ""}</div>
+          ${canProdLog ? `<div class="addbox" id="add-mainLog"><textarea class="in" id="txt-mainLog" placeholder="主厂生产进度…"></textarea>
+            ${photoPicker("log:mainLog")}
+            <div style="margin-top:8px"><button class="btn mini" onclick="A.addLog('${o.id}','mainLog')">提交打卡</button></div></div>` : ""}
+          ${logEntriesHtml(o.mainLog, o.id, "mainLog")}</div>
+        ${(o.subs || []).map(s => subCardHtml(o, s, canProdLog)).join("")}
+        ${canProdLog ? `<div style="margin-top:10px;border-top:.5px solid var(--line);padding-top:10px">
+          <button class="btn mini ghost" onclick="A.addSubPrompt('${o.id}')">＋ 添加加工点</button></div>` : ""}
       </div>
       ${logsOf("production").filter(f => !["preSample", "cutting"].includes(f.k)).map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canProdLog)).join("")}
     </div>
+    ${shipDateField ? `<div class="card" style="margin-top:14px">${kv([shipDateField])}</div>` : ""}
   </section>
 
   <section class="group">
-    <div class="group-title">三、验货问题<button class="btn mini ghost right" onclick="A.toggleAdd('insp')">＋ 新增</button></div>
+    <div class="group-title"><span class="cat-title">三、验货问题</span>${canInsp ? `<button class="btn mini ghost right" onclick="A.toggleAdd('insp')">＋ 新增</button>` : ""}</div>
     <div class="card">
-      <div class="addbox" id="add-insp">
-        <label class="field"><span>验货日期</span>${dateFieldHtml("insp-date", todayStr())}</label>
-        <div id="insp-items"><div class="grid2 insp-row">
-          <label class="field"><span>发现问题</span><textarea class="in insp-p" style="min-height:62px"></textarea></label>
-          <label class="field"><span>整改情况</span><textarea class="in insp-f" style="min-height:62px"></textarea></label></div></div>
+      ${canInsp ? `<div class="addbox" id="add-insp">
+        <div id="insp-items"><label class="field"><span>发现问题</span><textarea class="in insp-p" style="min-height:62px"></textarea></label></div>
         <div class="field" style="border:0"><span>照片</span>${photoPicker("insp")}</div>
         <div class="btn-row"><button class="btn mini ghost" onclick="A.inspAddRow()">＋ 再加一条</button>
-          <button class="btn mini" onclick="A.saveInsp('${o.id}')">保存验货记录</button></div></div>
-      ${o.inspections.length ? o.inspections.slice().sort((a, b) => (b.date < a.date ? -1 : 1)).map(g => `<div class="insp-day">
-        <div class="lf-head"><span class="d">${esc(fmtDate(g.date))}</span>
-          <span style="font-size:12.5px;color:var(--ink-2);font-weight:400">${esc(g.byName)} · <span class="num">${fmtT(g.t)}</span></span>
-          ${(isAdmin() || g.by === me().id) ? `<button class="btn plain right" style="color:var(--bad)" onclick="A.delInsp('${o.id}','${g.id}')">删除</button>` : ""}</div>
-        ${g.items.map(it => `<div class="insp-item"><div><span class="lbl p">发现问题</span>${esc(it.problem)}</div>
-          <div style="margin-top:4px"><span class="lbl f2">整改情况</span>${esc(it.fix) || "—"}</div></div>`).join("")}${photoGallery(g.photos)}</div>`).join("")
+          <button class="btn mini" onclick="A.saveInsp('${o.id}')">保存验货记录</button></div></div>` : ""}
+      ${o.inspections.length ? o.inspections.slice().sort((a, b) => b.t - a.t).map(g => inspBatchHtml(o, g, canInsp, canFix)).join("")
         : `<div class="empty">暂无验货记录</div>`}</div>
   </section>
 
   <section class="group">
-    <div class="group-title">四、跟单问题<button class="btn mini ghost right" onclick="A.toggleAdd('follow')">＋ 添加</button></div>
+    <div class="group-title"><span class="cat-title">四、跟单小结</span><button class="btn mini ghost right" onclick="A.toggleAdd('follow')">＋ 添加</button></div>
     <div class="card">
       <div class="addbox" id="add-follow" style="padding:12px 16px">
         <textarea class="in" id="txt-follow" placeholder="填写跟单过程中的问题、沟通事项…"></textarea>
@@ -737,7 +773,7 @@ function vAdmin() {
 
   <section class="group">
     <div class="group-title">工厂下拉选项</div>
-    <div class="card">${[["emb", "绣印工厂"], ["prod", "生产厂"], ["proc", "加工厂"]].map(([k, t]) => `
+    <div class="card">${[["fabric", "面料工厂"], ["emb", "绣印工厂"], ["prod", "生产厂"]].map(([k, t]) => `
       <div class="card-pad" style="padding-bottom:10px">
         <div class="row-sub" style="margin-bottom:6px">${t}</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${state.factories[k].map(x =>
@@ -943,7 +979,9 @@ const A = {
   },
   editLog(oid, key, eid) {
     const o = state.orders.find(x => x.id === oid);
-    const list = /^sub\d+$/.test(key) ? o.subs[+key.slice(3)].log : (o.logs[key] || []);
+    const list = key === "mainLog" ? o.mainLog
+      : key.startsWith("sub:") ? ((o.subs.find(s => s.id === key.slice(4)) || {}).log || [])
+      : (o.logs[key] || []);
     const e = list.find(x => x.id === eid); if (!e) return;
     modal({ title: "修改打卡内容", input: "textarea", value: e.text, okText: "保存",
       onOk: v => { if (v && v.trim()) run(() => api("PATCH", `/orders/${oid}/logs/${key}/${eid}`, { text: v.trim() }), "已修改"); } });
@@ -952,28 +990,59 @@ const A = {
     modal({ title: "删除这条打卡记录？", danger: true, okText: "确认删除",
       onOk: () => run(() => api("DELETE", `/orders/${oid}/logs/${key}/${eid}`), "已删除") });
   },
-  async setSubFactory(oid, i, factory) {
-    await run(() => api("PATCH", `/orders/${oid}/subs/${i}`, { factory }), "已更新加工厂");
+
+  /* ---- 生产进度：动态加工点 ---- */
+  addSubPrompt(oid) {
+    modal({ title: "添加加工点", body: "给这个加工点起个名字，比如「绣花外发点」「二次印花点」。", input: "text", okText: "添加",
+      onOk: v => { const name = (v || "").trim(); if (name) run(() => api("POST", `/orders/${oid}/subs`, { name }), "已添加加工点：" + name); } });
+  },
+  renameSub(oid, subId) {
+    const o = state.orders.find(x => x.id === oid);
+    const sub = o && o.subs.find(x => x.id === subId);
+    if (!sub) return;
+    modal({ title: "修改加工点名称", input: "text", value: sub.name, okText: "保存",
+      onOk: v => { const name = (v || "").trim(); if (name) run(() => api("PATCH", `/orders/${oid}/subs/${subId}`, { name }), "已修改"); } });
+  },
+  delSub(oid, subId) {
+    modal({ title: "删除这个加工点？", body: "删除后该加工点下的打卡记录一并删除，且不可恢复。", danger: true, okText: "确认删除",
+      onOk: () => run(() => api("DELETE", `/orders/${oid}/subs/${subId}`), "已删除") });
   },
 
+  /* ---- 验货：发现问题(业务员) / 整改情况(下厂员) 各自独立 ---- */
   inspAddRow() {
-    const d = document.createElement("div"); d.className = "grid2 insp-row";
-    d.innerHTML = `<label class="field"><span>发现问题</span><textarea class="in insp-p" style="min-height:62px"></textarea></label>
-      <label class="field"><span>整改情况</span><textarea class="in insp-f" style="min-height:62px"></textarea></label>`;
+    const d = document.createElement("label"); d.className = "field";
+    d.innerHTML = `<span>发现问题</span><textarea class="in insp-p" style="min-height:62px"></textarea>`;
     $("insp-items").appendChild(d);
   },
   async saveInsp(oid) {
-    const date = $("insp-date").value; if (!date) return toast("请选择验货日期");
-    const items = [...document.querySelectorAll(".insp-row")].map(r => ({
-      problem: r.querySelector(".insp-p").value.trim(), fix: r.querySelector(".insp-f").value.trim()
-    })).filter(x => x.problem || x.fix);
+    const problems = [...document.querySelectorAll(".insp-p")].map(t => t.value.trim()).filter(Boolean);
     const photos = photoDraft.insp || [];
-    if (!items.length && !photos.length) return toast("请至少填写一条问题或加照片");
-    await run(() => api("POST", `/orders/${oid}/inspections`, { date, items, photos }).then(() => { delete photoDraft.insp; }), "验货记录已保存");
+    if (!problems.length && !photos.length) return toast("请至少填写一条发现的问题或加照片");
+    await run(() => api("POST", `/orders/${oid}/inspections`, { problems, photos }).then(() => { delete photoDraft.insp; }), "验货记录已保存");
   },
   delInsp(oid, gid) {
     modal({ title: "删除这组验货记录？", danger: true, okText: "确认删除",
       onOk: () => run(() => api("DELETE", `/orders/${oid}/inspections/${gid}`), "已删除") });
+  },
+  editInspProblem(oid, gid, itemId) {
+    const o = state.orders.find(x => x.id === oid);
+    const g = o && o.inspections.find(x => x.id === gid);
+    const it = g && g.items.find(x => x.id === itemId);
+    if (!it) return;
+    modal({ title: "修改发现的问题", input: "textarea", value: it.problem, okText: "保存",
+      onOk: v => { if (v && v.trim()) run(() => api("PATCH", `/orders/${oid}/inspections/${gid}/items/${itemId}`, { problem: v.trim() }), "已修改"); } });
+  },
+  editInspFix(oid, gid, itemId) {
+    const o = state.orders.find(x => x.id === oid);
+    const g = o && o.inspections.find(x => x.id === gid);
+    const it = g && g.items.find(x => x.id === itemId);
+    if (!it) return;
+    modal({ title: "填写整改情况", input: "textarea", value: it.fix || "", okText: "保存",
+      onOk: v => run(() => api("PATCH", `/orders/${oid}/inspections/${gid}/items/${itemId}`, { fix: (v || "").trim() }), "已保存") });
+  },
+  addInspNote(oid, gid, itemId) {
+    modal({ title: "添加补充说明", input: "textarea", okText: "添加",
+      onOk: v => { if (v && v.trim()) run(() => api("POST", `/orders/${oid}/inspections/${gid}/items/${itemId}/notes`, { text: v.trim() }), "已添加"); } });
   },
   async addFollow(oid) {
     const text = ($("txt-follow").value || "").trim();
@@ -1147,7 +1216,7 @@ const A = {
   // 表头列名 -> 字段
   importMap() {
     return { "货号": "styleNo", "款式名": "styleName", "款式": "style", "数量": "qty", "款式描述": "desc",
-      "订单交期": "deadline", "交期": "deadline", "面料": "fabric", "业务员": "sales", "下厂员": "follower",
+      "订单交期": "deadline", "交期": "deadline", "面料工厂": "fabricFactory", "业务员": "sales", "下厂员": "follower",
       "季节": "_season", "订单季节": "_season", "绣印工厂": "embFactory", "生产厂": "factory" };
   },
   // 二维数组（首行表头）-> 待确认的订单列表
