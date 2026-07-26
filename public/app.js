@@ -1426,13 +1426,16 @@ window.addEventListener("beforeinstallprompt", (e) => {
 window.addEventListener("appinstalled", () => { deferredInstall = null; toast("已添加到手机主屏"); });
 
 (async function boot() {
-  // 欢迎界面只在真的输入账号密码登录那一刻出现（见 A.login），
-  // 打开App时如果本来就是登录状态(token还有效)，直接进正常页面，不重复打扰
+  // 每次打开App、只要本来是登录状态，都要过一遍欢迎界面（logo/公司名称/跟单系统）。
+  // index.html 里已经有一份静态的欢迎界面兜底，JS 跑起来之前手机屏幕就不会是空的；
+  // 这里只需要在数据没回来之前维持住同一份内容，不要提前露出正在加载的空页面。
   if (state.token) {
+    showWelcome = true; render();
     try { await refresh(); }
-    catch (e) { state.token = null; localStorage.removeItem("daka_token"); }
+    catch (e) { state.token = null; localStorage.removeItem("daka_token"); showWelcome = false; }
   }
   render();
+  if (showWelcome) setTimeout(A.dismissWelcome, 1500);
   if (state.me) { A.refreshUnread(); A.loadContacts(true); }
   setInterval(() => { if (state.me) A.refreshUnread(); }, 10000);
   setInterval(() => {

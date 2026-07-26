@@ -262,20 +262,28 @@ async function apiAs(phone, method, p, body) {
      "点安装弹出图文引导");
   A.modalCancel(); await sleep(100);
 
-  // ---- 重新打开App(已登录态，token还有效)不应该再弹欢迎界面——那个只在真正输入账号密码登录那一刻出现 ----
+  // ---- 重新打开App(已登录态，token还有效)：静态欢迎界面先兜底(不空白)，接着 JS 接管欢迎界面，1.5秒后进正常页面 ----
   const freshToken = (await (await fetch(BASEU + "/api/login", { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ phone: "13800000000", password: "123456" }) })).json()).token;
-  const dom2 = new JSDOM(fs.readFileSync(ROOT + "/index.html", "utf8"), { runScripts: "dangerously", url: BASEU + "/", virtualConsole: vc });
+  const html2 = fs.readFileSync(ROOT + "/index.html", "utf8");
+  ok(html2.includes("天津锦利国际贸易有限公司") && html2.includes("跟单系统") && html2.includes('id="app">'),
+    "index.html 里已内置静态欢迎界面，JS 跑起来之前手机屏幕不会是空的");
+  const dom2 = new JSDOM(html2, { runScripts: "dangerously", url: BASEU + "/", virtualConsole: vc });
   const win2 = dom2.window;
+  // JS 还没执行前，静态版本已经在屏幕上了
+  ok(win2.document.getElementById("app").innerHTML.includes("天津锦利国际贸易有限公司"), "JS 执行前就已经显示静态欢迎界面，不是空白");
   win2.fetch = (u, o) => fetch(new URL(u, BASEU + "/").toString(), o);
   win2.FormData = FormData; win2.Blob = Blob; win2.URL.createObjectURL = () => "blob:x"; win2.URL.revokeObjectURL = () => {};
   win2.localStorage.setItem("daka_token", freshToken);
   const sc2 = win2.document.createElement("script");
   sc2.textContent = fs.readFileSync(ROOT + "/app.js", "utf8");
   win2.document.body.appendChild(sc2);
-  await sleep(400);
-  ok(!win2.eval("showWelcome"), "重新打开App时(已登录)不会触发欢迎界面");
-  ok(win2.document.getElementById("app").innerHTML.includes("订单列表"), "重新打开App时直接进入正常页面，没有额外等待");
+  await sleep(100);
+  ok(win2.eval("showWelcome") && win2.document.getElementById("app").innerHTML.includes("跟单系统"),
+    "重新打开已登录的App，JS 接管后欢迎界面依然在(不会中间掉一下空白)");
+  await sleep(2200);
+  ok(!win2.eval("showWelcome") && win2.document.getElementById("app").innerHTML.includes("订单列表"),
+    "欢迎界面展示一会儿后自动进入正常页面");
 
   console.log(`\n结果：PASS ${pass}, FAIL ${fail}`);
   process.exit(fail ? 1 : 0);
