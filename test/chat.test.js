@@ -24,6 +24,21 @@ async function call(m,p,t,b){const h={"Content-Type":"application/json"};if(t)h.
   await call("PATCH","/users/"+wang.id,aT,{role:"follower"});
   ok((await call("DELETE","/roles/"+rk,aT)).status===200,"无人使用后可删除职位");
 
+  // 季节管理（管理员可增删，非管理员不行；使用中的季节不可删）
+  ok(Array.isArray(boot.seasons)&&boot.seasons.length>0,"bootstrap 带季节列表");
+  const ns=await call("POST","/seasons",aT,{name:"SS2099"});
+  ok(ns.status===200&&ns.j.includes("SS2099"),"管理员新增季节");
+  ok((await call("POST","/seasons",aT,{name:"SS2099"})).status===400,"不能新增同名季节");
+  ok((await call("POST","/seasons",wT,{name:"SS2100"})).status===403,"非管理员不能新增季节");
+  const so=await call("POST","/orders",aT,{season:"SS2099",values:{styleNo:"SEASON-1"}});
+  ok(so.status===200,"用新季节建单");
+  ok((await call("DELETE","/seasons/SS2099",aT)).status===400,"季节使用中不可删除");
+  ok((await call("DELETE","/seasons/"+encodeURIComponent("FW2099"),aT)).status===404,"删除不存在的季节报错");
+  const noUse=await call("POST","/seasons",aT,{name:"FW2099"});
+  ok(noUse.status===200,"再新增一个没人用的季节");
+  ok((await call("DELETE","/seasons/"+encodeURIComponent("FW2099"),wT)).status===403,"非管理员不能删季节");
+  ok((await call("DELETE","/seasons/"+encodeURIComponent("FW2099"),aT)).status===200,"无人使用可删除季节");
+
   // 聊天
   const cT=(await call("POST","/login",null,{phone:"13811112222",password:"123456"})).j.token; // 陈晓芳
   let contacts=(await call("GET","/chat/contacts",aT)).j;

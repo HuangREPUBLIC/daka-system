@@ -74,6 +74,19 @@ async function apiAs(phone, method, p, body) {
   ok(sel && [...sel.options].some(o => o.textContent === "跟单主管"), "自定义职位出现在员工职位下拉里");
   ok(app().includes("查看打卡"), "管理员可查看员工打卡");
 
+  // ---- 管理后台：季节管理（新增/删除，且新建订单里能选到） ----
+  ok(app().includes("季节管理"), "管理后台有季节管理入口");
+  doc.getElementById("ns-name").value = "SS2099UI";
+  await A.addSeason(); await sleep(500);
+  ok(st().seasons.includes("SS2099UI"), "通过界面新增季节");
+  window.go("new"); await sleep(300);
+  const newSeasonSel = doc.getElementById("nf-season");
+  ok(newSeasonSel && [...newSeasonSel.options].some(o => o.value === "SS2099UI"), "新增的季节出现在新建订单的季节下拉里");
+  window.go("admin"); await sleep(400);
+  A.delSeason(encodeURIComponent("SS2099UI")); await sleep(150);
+  await A.modalOk(); await sleep(500);
+  ok(!st().seasons.includes("SS2099UI"), "通过界面删除季节");
+
   // ---- 聊天 ----
   window.go("chat"); await sleep(600);
   ok(app().includes('data-view="chat"') && app().includes("chat-contacts"), "聊天页渲染");

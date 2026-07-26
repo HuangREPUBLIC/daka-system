@@ -76,6 +76,15 @@ const DEFAULT_ROLES = [
   { k: "sales", label: "业务员", template: "sales", core: true },
   { k: "follower", label: "下厂员", template: "follower", core: true }
 ];
+// 季节初始列表：当前年份前一年到后两年，SS/FW 各一档（管理员可在后台自行增删）
+function defaultSeasons() {
+  let y;
+  try { y = +new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Shanghai", year: "numeric" }).format(new Date()); }
+  catch (e) { y = new Date().getFullYear(); }
+  const list = [];
+  for (let yy = y - 1; yy <= y + 2; yy++) list.push("SS" + yy, "FW" + yy);
+  return list;
+}
 function columnExists(table, col) {
   return db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === col);
 }
@@ -96,6 +105,15 @@ function ensureDefaults() {
     factories.fabric = [];
     setSetting("factories", factories);
     console.log("[db] 已为现有数据库补齐面料工厂配置");
+  }
+  // 老库补齐季节配置：按原先自动生成的年份区间为底，再把已有订单实际用到的季节也保留进去，避免"消失"
+  const seasons = getSetting("seasons", null);
+  if (!seasons || !seasons.length) {
+    const merged = defaultSeasons();
+    db.prepare("SELECT DISTINCT season FROM orders WHERE season IS NOT NULL AND season <> ''").all()
+      .forEach(r => { if (!merged.includes(r.season)) merged.push(r.season); });
+    setSetting("seasons", merged);
+    console.log("[db] 已为现有数据库补齐季节配置");
   }
   // 老库把「面料」文本字段换成「面料工厂」下拉（插在绣印工厂前面），不影响其它自定义字段
   const fields = getSetting("fields", null);
@@ -190,6 +208,7 @@ function seedIfEmpty() {
     emb: ["锦绣绣花厂", "华艺印花厂", "美达绣印"],
     prod: ["宏发制衣厂", "联诚服装厂", "永盛制衣"]
   });
+  setSetting("seasons", defaultSeasons());
   setSetting("fields", {
     order: [
       { k: "sales", label: "业务员", type: "user-sales", core: true },

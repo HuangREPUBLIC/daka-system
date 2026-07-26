@@ -91,6 +91,7 @@ router.get("/bootstrap", (req, res) => {
     fields: getSetting("fields", { order: [], production: [] }),
     factories: getSetting("factories", { emb: [], prod: [], proc: [] }),
     roles: getSetting("roles", []),
+    seasons: getSetting("seasons", []),
     orders: allOrdersPublic()
   });
 });
@@ -210,6 +211,28 @@ router.delete("/factories/:kind/:name", A.adminRequired, (req, res) => {
   factories[kind] = factories[kind].filter(x => x !== decodeURIComponent(name));
   setSetting("factories", factories);
   res.json(factories);
+});
+
+/* ---------- 季节管理（管理员：新建订单可选的季节列表） ---------- */
+router.post("/seasons", A.adminRequired, (req, res) => {
+  const name = String((req.body || {}).name || "").trim();
+  if (!name) return res.status(400).json({ error: "请填写季节名称" });
+  const seasons = getSetting("seasons", []);
+  if (seasons.includes(name)) return res.status(400).json({ error: "已有同名季节" });
+  seasons.push(name);
+  setSetting("seasons", seasons);
+  res.json(seasons);
+});
+
+router.delete("/seasons/:name", A.adminRequired, (req, res) => {
+  const name = decodeURIComponent(req.params.name);
+  const seasons = getSetting("seasons", []);
+  if (!seasons.includes(name)) return res.status(404).json({ error: "季节不存在" });
+  const used = db.prepare("SELECT COUNT(*) c FROM orders WHERE season = ?").get(name).c;
+  if (used) return res.status(400).json({ error: `还有 ${used} 个订单是「${name}」季节，请先修改这些订单的季节` });
+  const next = seasons.filter(x => x !== name);
+  setSetting("seasons", next);
+  res.json(next);
 });
 
 /* =========================================================

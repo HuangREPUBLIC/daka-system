@@ -97,6 +97,21 @@ const migratedItem = migratedOrder.inspections[0].items[0];
 ok(migratedOrder.inspections[0].date === undefined, "验货记录不再有 date 字段");
 ok(!!migratedItem.id && migratedItem.problemBy === "u1" && Array.isArray(migratedItem.notes), "验货 item 补上 id/问题作者/补充说明数组");
 
+// 6) 老库没有季节配置：升级后要自动补齐，且把订单里实际用过、但不在默认年份区间内的季节也保留住
+r = spawnSync(process.execPath, ["-e", `
+  process.env.DATA_DIR = ${JSON.stringify(DATA_DIR)};
+  const d = require(${JSON.stringify(dbPath)});
+  d.seedIfEmpty();
+  d.db.prepare("DELETE FROM settings WHERE key = 'seasons'").run();
+  d.db.prepare("INSERT INTO orders(id,season,created_by,created_at,updated_at,data) VALUES(?,?,?,?,?,?)")
+    .run("oldseason1", "SS2099", "u1", 1, 1, JSON.stringify({values:{},logs:{},mainLog:[],subs:[],inspections:[],followIssues:[]}));
+  d.ensureDefaults();
+  console.log(JSON.stringify(d.getSetting("seasons", null)));
+`], { encoding: "utf8", env: Object.assign({}, process.env, { DATA_DIR }) });
+const seasonsOut = JSON.parse((r.stdout.trim().split("\n").pop() || "null"));
+ok(r.status === 0 && Array.isArray(seasonsOut) && seasonsOut.length > 0, "老库升级后自动补齐季节配置");
+ok(seasonsOut.includes("SS2099"), "老订单实际用到的季节即使不在默认年份区间也被保留");
+
 fs.rmSync(DATA_DIR, { recursive: true, force: true });
 console.log(`\n结果：PASS ${pass}, FAIL ${fail}`);
 process.exit(fail ? 1 : 0);

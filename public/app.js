@@ -9,7 +9,7 @@
 let state = {
   token: localStorage.getItem("daka_token") || null,
   me: null, users: [], fields: { order: [], production: [] },
-  factories: { emb: [], prod: [], proc: [] }, orders: [], roles: [],
+  factories: { emb: [], prod: [], proc: [] }, orders: [], roles: [], seasons: [],
   chat: { contacts: [], activeId: null, contact: null, messages: [], draft: "", att: null },
   unread: { total: 0, byUser: {} },
   myLogs: null
@@ -99,6 +99,7 @@ async function refresh() {
   const b = await api("GET", "/bootstrap");
   state.me = b.me; state.users = b.users; state.fields = b.fields;
   state.factories = b.factories; state.orders = b.orders; state.roles = b.roles || [];
+  state.seasons = b.seasons || [];
 }
 async function run(fn, okMsg) {
   try { await fn(); await refresh(); render(); if (okMsg) toast(okMsg); }
@@ -170,13 +171,9 @@ function fileFieldHtml(id, accept, onchange, pickText) {
       <span class="file-pick">${esc(pickText || "选择文件")}</span></button></div>`;
 }
 
-function chinaYear() {
-  try { return +new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Shanghai", year: "numeric" }).format(new Date()); }
-  catch (e) { return new Date().getFullYear(); }
-}
+// 季节列表由管理员在后台维护(state.seasons)；订单里实际用到、但已被管理员删掉的季节仍要能显示，不能让老订单"消失"
 function seasonOptions(cur) {
-  const y = chinaYear(), list = [];
-  for (let yy = y - 1; yy <= y + 2; yy++) list.push("SS" + yy, "FW" + yy);
+  const list = (state.seasons || []).slice();
   state.orders.forEach(o => { if (o.season && !list.includes(o.season)) list.unshift(o.season); });
   if (cur && !list.includes(cur)) list.unshift(cur);
   return list;
@@ -759,6 +756,15 @@ function vAdmin() {
   </section>
 
   <section class="group">
+    <div class="group-title">季节管理</div>
+    <div class="card"><div class="card-pad">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">${state.seasons.map(s => `<span class="tag role">${esc(s)}
+        <a href="javascript:void(0)" onclick="A.delSeason('${encodeURIComponent(s)}')" style="margin-left:4px">✕</a></span>`).join("")}</div></div>
+      <label class="field"><span>新季节名称</span><input class="in" id="ns-name" placeholder="例：SS2029"></label>
+      <div class="btn-row"><button class="btn" onclick="A.addSeason()">添加季节</button></div></div>
+  </section>
+
+  <section class="group">
     <div class="group-title">自定义字段</div>
     <div class="card">
       ${["order", "production"].map(s => `<div class="card-pad" style="padding-bottom:6px">
@@ -1088,6 +1094,16 @@ const A = {
     const r = state.roles.find(x => x.k === k); if (!r) return;
     modal({ title: `删除职位「${r.label}」？`, body: "只有没人担任该职位时才能删除。", danger: true, okText: "确认删除",
       onOk: () => run(() => api("DELETE", "/roles/" + k), "职位已删除") });
+  },
+  async addSeason() {
+    const name = $("ns-name").value.trim();
+    if (!name) return toast("请填写季节名称");
+    await run(() => api("POST", "/seasons", { name }), "季节已添加：" + name);
+  },
+  delSeason(encName) {
+    const name = decodeURIComponent(encName);
+    modal({ title: `删除季节「${name}」？`, body: "只有没有订单使用该季节时才能删除。", danger: true, okText: "确认删除",
+      onOk: () => run(() => api("DELETE", "/seasons/" + encName), "季节已删除") });
   },
   async addField() {
     const section = $("cf-sec").value, label = $("cf-label").value.trim(), type = $("cf-type").value;
