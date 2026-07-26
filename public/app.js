@@ -17,6 +17,7 @@ let state = {
 let route = { v: "orders", id: null };
 let editingBasic = false, importPreview = null, importRaw = "";
 let showWelcome = false;   // 登录成功后短暂展示的欢迎界面（logo/公司名称/跟单系统）
+const expandedLogGroups = new Set();   // 打卡记录里手动点开"展开全部"的订单(orderId)
 let filt = { season: "", sales: "", follower: "", kw: "" };
 let modalState = null;
 let deferredInstall = null;   // 安卓/桌面 Chrome 的原生安装事件
@@ -651,6 +652,7 @@ function vDetail() {
 }
 
 /* ---------- 打卡记录（按订单分组，组内按时间倒序） ---------- */
+const LOG_GROUP_PREVIEW = 5;   // 每个订单默认只显示最近几条，记录多了不用一直往下滚
 function logListHtml(rows) {
   if (!rows) return `<div class="empty">加载中…</div>`;
   if (!rows.length) return `<div class="empty">还没有打卡记录</div>`;
@@ -663,13 +665,21 @@ function logListHtml(rows) {
   });
   groups.forEach(g => g.items.sort((a, b) => b.t - a.t));
   groups.sort((a, b) => b.items[0].t - a.items[0].t);
-  return groups.map(g => `<div class="card" style="margin-bottom:14px">
+  return groups.map(g => {
+    const expanded = expandedLogGroups.has(g.orderId);
+    const visible = expanded ? g.items : g.items.slice(0, LOG_GROUP_PREVIEW);
+    const hidden = g.items.length - visible.length;
+    return `<div class="card" style="margin-bottom:14px">
     <div class="lf-head" style="padding:11px 16px 0">
       <a href="javascript:void(0)" onclick="go('detail','${g.orderId}')">${esc(g.styleNo || "")} ${esc(g.styleName || "")}</a>
       <span class="cnt right">共 ${g.items.length} 条</span></div>
-    <div class="loglist">${g.items.map(r => `<div class="logrow">
+    <div class="loglist">${visible.map(r => `<div class="logrow">
       <div class="lr-top"><span>${esc(r.label)}</span><span class="num right">${fmtT(r.t)}</span></div>
-      <div class="lr-text">${esc(r.text)}</div></div>`).join("")}</div></div>`).join("");
+      <div class="lr-text">${esc(r.text)}</div></div>`).join("")}</div>
+    ${hidden > 0 ? `<button class="btn plain block" onclick="A.toggleLogGroup('${g.orderId}')">展开剩余 ${hidden} 条</button>`
+      : (expanded && g.items.length > LOG_GROUP_PREVIEW ? `<button class="btn plain block" onclick="A.toggleLogGroup('${g.orderId}')">收起</button>` : "")}
+    </div>`;
+  }).join("");
 }
 
 /* ---------- 聊天 ---------- */
@@ -1188,9 +1198,13 @@ const A = {
   async delFactory(kind, encName) { await run(() => api("DELETE", `/factories/${kind}/${encName}`), "已删除"); },
 
   async loadMyLogs(userId) {
-    state.myLogs = null;
+    state.myLogs = null; expandedLogGroups.clear();
     try { state.myLogs = await api("GET", `/users/${userId}/logs`); }
     catch (e) { state.myLogs = []; toast((e && e.error) || "读取失败"); }
+    render();
+  },
+  toggleLogGroup(orderId) {
+    if (expandedLogGroups.has(orderId)) expandedLogGroups.delete(orderId); else expandedLogGroups.add(orderId);
     render();
   },
   submitFeedback() {
@@ -1412,13 +1426,13 @@ window.addEventListener("beforeinstallprompt", (e) => {
 window.addEventListener("appinstalled", () => { deferredInstall = null; toast("已添加到手机主屏"); });
 
 (async function boot() {
+  // 欢迎界面只在真的输入账号密码登录那一刻出现（见 A.login），
+  // 打开App时如果本来就是登录状态(token还有效)，直接进正常页面，不重复打扰
   if (state.token) {
-    showWelcome = true; render();   // 有本地登录态就先顶上欢迎界面，接口在后台加载，避免打开时先空白一下
     try { await refresh(); }
-    catch (e) { state.token = null; localStorage.removeItem("daka_token"); showWelcome = false; }
+    catch (e) { state.token = null; localStorage.removeItem("daka_token"); }
   }
   render();
-  if (showWelcome) setTimeout(A.dismissWelcome, 1500);
   if (state.me) { A.refreshUnread(); A.loadContacts(true); }
   setInterval(() => { if (state.me) A.refreshUnread(); }, 10000);
   setInterval(() => {

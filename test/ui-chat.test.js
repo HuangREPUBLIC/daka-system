@@ -112,13 +112,24 @@ async function apiAs(phone, method, p, body) {
 
   // ---- 打卡记录按订单分组显示（王建国在两个不同订单上都有打卡） ----
   const wang = st().users.find(u => u.name === "王建国");
-  A.viewStaffLogs(wang.id); await sleep(500);
   const wangOrders = st().orders.filter(o => o.values.follower === wang.id);
   ok(wangOrders.length >= 2, "测试前提：王建国在至少两个订单上有打卡记录");
+  // 记录多了(超过预览条数)要能收起来，不然一个订单打卡多了整页会很长
+  for (let i = 0; i < 8; i++) {
+    await apiAs("13855556666", "POST", `/orders/${wangOrders[0].id}/logs`, { key: "cutting", text: "批量测试打卡" + i });
+  }
+  A.viewStaffLogs(wang.id); await sleep(600);
   const firstGroupIdx = app().indexOf(wangOrders[0].values.styleNo);
   const secondGroupIdx = app().indexOf(wangOrders[1].values.styleNo);
   ok(firstGroupIdx > -1 && secondGroupIdx > -1, "打卡记录按订单货号分组显示");
   ok(app().includes("共") && app().includes("条"), "每组显示该订单的打卡条数");
+  ok(!app().includes("批量测试打卡0"), "记录多的订单默认只显示最近几条，最早的先被收起来");
+  ok(/展开剩余 \d+ 条/.test(app()), "记录超过预览条数时显示「展开剩余」按钮");
+  A.toggleLogGroup(wangOrders[0].id); await sleep(200);
+  ok(app().includes("批量测试打卡0") && app().includes("批量测试打卡7"), "点击展开后能看到全部记录，包括最早的");
+  ok(app().includes("收起"), "展开后按钮变成「收起」");
+  A.toggleLogGroup(wangOrders[0].id); await sleep(200);
+  ok(!app().includes("批量测试打卡0"), "再点一下收起，恢复只显示最近几条");
 
   // ---- 聊天 ----
   window.go("chat"); await sleep(600);
@@ -250,6 +261,21 @@ async function apiAs(phone, method, p, body) {
   ok(doc.getElementById("mask").classList.contains("show") && doc.getElementById("mask").innerHTML.includes("添加到主屏"),
      "点安装弹出图文引导");
   A.modalCancel(); await sleep(100);
+
+  // ---- 重新打开App(已登录态，token还有效)不应该再弹欢迎界面——那个只在真正输入账号密码登录那一刻出现 ----
+  const freshToken = (await (await fetch(BASEU + "/api/login", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phone: "13800000000", password: "123456" }) })).json()).token;
+  const dom2 = new JSDOM(fs.readFileSync(ROOT + "/index.html", "utf8"), { runScripts: "dangerously", url: BASEU + "/", virtualConsole: vc });
+  const win2 = dom2.window;
+  win2.fetch = (u, o) => fetch(new URL(u, BASEU + "/").toString(), o);
+  win2.FormData = FormData; win2.Blob = Blob; win2.URL.createObjectURL = () => "blob:x"; win2.URL.revokeObjectURL = () => {};
+  win2.localStorage.setItem("daka_token", freshToken);
+  const sc2 = win2.document.createElement("script");
+  sc2.textContent = fs.readFileSync(ROOT + "/app.js", "utf8");
+  win2.document.body.appendChild(sc2);
+  await sleep(400);
+  ok(!win2.eval("showWelcome"), "重新打开App时(已登录)不会触发欢迎界面");
+  ok(win2.document.getElementById("app").innerHTML.includes("订单列表"), "重新打开App时直接进入正常页面，没有额外等待");
 
   console.log(`\n结果：PASS ${pass}, FAIL ${fail}`);
   process.exit(fail ? 1 : 0);
