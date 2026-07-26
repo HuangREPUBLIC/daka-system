@@ -54,6 +54,12 @@ db.exec(`
     updated_at INTEGER NOT NULL,
     data TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS feedback (
+    id TEXT PRIMARY KEY,
+    by_user TEXT NOT NULL,
+    text TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
 `);
 
 const uid = () => crypto.randomBytes(9).toString("base64url");

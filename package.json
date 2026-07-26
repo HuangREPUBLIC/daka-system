@@ -1,7 +1,7 @@
 {
-  "name": "daka-system",
+  "name": "gendan-system",
   "version": "1.0.0",
-  "description": "服装生产跟单打卡系统 — 手机/电脑通用，多角色协作，实时共享",
+  "description": "跟单系统 — 服装生产进度跟踪，手机/电脑通用，多角色协作，实时共享",
   "type": "commonjs",
   "main": "server/index.js",
   "scripts": {

@@ -40,7 +40,9 @@ async function apiAs(phone, method, p, body) {
   // ---- 登录 ----
   doc.getElementById("lg-phone").value = "13800000000";
   doc.getElementById("lg-pass").value = "123456";
-  await A.login(); await sleep(500);
+  await A.login(); await sleep(50);
+  ok(app().includes("天津锦利国际贸易有限公司") && app().includes("跟单系统"), "登录后先显示欢迎界面(公司名+跟单系统)");
+  A.dismissWelcome(); await sleep(500);
   ok(app().includes("订单列表"), "管理员登录");
 
   // ---- 导航：聊天取代我的打卡 ----
@@ -54,12 +56,22 @@ async function apiAs(phone, method, p, body) {
   const opts = [...filterSel.options].map(o => o.value);
   ok(opts.includes("SS" + (y + 1)) && opts.includes("FW" + (y + 1)), "季节筛选含未来季节(不再锁死在已有订单)");
 
-  // ---- 我的账号：职位 + 打卡记录 ----
+  // ---- 搜索框支持按服装厂(生产厂)搜索 ----
+  A.setFKw("宏发"); await sleep(400);
+  ok(app().includes("SS27-T012") && !app().includes("裙"), "按生产厂关键字搜到对应订单，其它订单被过滤掉");
+  A.setFKw(""); await sleep(400);
+
+  // ---- 我的账号：职位 + 打卡记录 + 意见反馈 ----
   window.go("account"); await sleep(500);
   ok(!app().includes("角色"), "全站不再出现「角色」字样");
   ok(app().includes(st().me.roleLabel), "我的账号显示职位名称");
   ok(app().includes("退出登录"), "我的页面有退出登录入口");
   ok(app().includes("我的打卡记录"), "打卡记录移到我的账号");
+  ok(app().includes("意见反馈"), "「我的」页有意见反馈入口");
+  A.submitFeedback(); await sleep(100);
+  doc.getElementById("m-input").value = "UI测试-建议增加导出定时任务";
+  await A.modalOk(); await sleep(400);
+  ok(!doc.getElementById("mask").classList.contains("show"), "反馈提交后弹窗关闭");
 
   // ---- 管理后台：职位管理 ----
   window.go("admin"); await sleep(400);
@@ -86,6 +98,24 @@ async function apiAs(phone, method, p, body) {
   A.delSeason(encodeURIComponent("SS2099UI")); await sleep(150);
   await A.modalOk(); await sleep(500);
   ok(!st().seasons.includes("SS2099UI"), "通过界面删除季节");
+
+  // ---- 管理后台：数据导出挪到员工账号/新增员工附近，且能看到刚提交的意见反馈 ----
+  ok(app().indexOf("数据导出") < app().indexOf("职位管理") && app().indexOf("数据导出") < app().indexOf("季节管理"),
+    "数据导出已挪到员工账号/新增员工附近，排在职位管理/季节管理前面");
+  ok(!!doc.getElementById("exp-season"), "数据导出带季节筛选下拉");
+  await sleep(300);
+  ok(app().includes("意见反馈") && app().includes("UI测试-建议增加导出定时任务") && app().includes("王建国"),
+    "管理员能在后台看到刚提交的意见反馈，带提交人姓名");
+
+  // ---- 打卡记录按订单分组显示（王建国在两个不同订单上都有打卡） ----
+  const wang = st().users.find(u => u.name === "王建国");
+  A.viewStaffLogs(wang.id); await sleep(500);
+  const wangOrders = st().orders.filter(o => o.values.follower === wang.id);
+  ok(wangOrders.length >= 2, "测试前提：王建国在至少两个订单上有打卡记录");
+  const firstGroupIdx = app().indexOf(wangOrders[0].values.styleNo);
+  const secondGroupIdx = app().indexOf(wangOrders[1].values.styleNo);
+  ok(firstGroupIdx > -1 && secondGroupIdx > -1, "打卡记录按订单货号分组显示");
+  ok(app().includes("共") && app().includes("条"), "每组显示该订单的打卡条数");
 
   // ---- 聊天 ----
   window.go("chat"); await sleep(600);
@@ -153,7 +183,7 @@ async function apiAs(phone, method, p, body) {
   // ---- 生产进度/验货问题/头部/高亮 等新版界面 ----
   A.forceLogout(); await sleep(150);
   doc.getElementById("lg-phone").value = "13800000000"; doc.getElementById("lg-pass").value = "123456";
-  await A.login(); await sleep(400);
+  await A.login(); A.dismissWelcome(); await sleep(400);
   const o1 = st().orders.find(o => o.values.styleNo === "SS27-T012");
   window.go("detail", o1.id); await sleep(500);
   ok(app().includes('class="cat-title"') && app().includes("一、订单明细") && app().includes("四、跟单小结"), "四大类标题都带高亮 class");
@@ -178,7 +208,7 @@ async function apiAs(phone, method, p, body) {
   ok(app().includes("＋ 新增") && app().includes("三、验货问题"), "管理员(等同业务员权限)能看到验货新增入口");
   A.forceLogout(); await sleep(150);
   doc.getElementById("lg-phone").value = "13811112222"; doc.getElementById("lg-pass").value = "123456"; // 陈晓芳(sales)
-  await A.login(); await sleep(400);
+  await A.login(); A.dismissWelcome(); await sleep(400);
   window.go("detail", o1.id); await sleep(400);
   ok(app().includes("＋ 新增"), "业务员能看到验货新增入口");
   A.toggleAdd("insp"); await sleep(100);
@@ -191,7 +221,7 @@ async function apiAs(phone, method, p, body) {
 
   A.forceLogout(); await sleep(150);
   doc.getElementById("lg-phone").value = "13855556666"; doc.getElementById("lg-pass").value = "123456"; // 王建国(follower, 负责o1)
-  await A.login(); await sleep(400);
+  await A.login(); A.dismissWelcome(); await sleep(400);
   window.go("detail", o1.id); await sleep(400);
   ok(!app().includes("＋ 新增") || !app().includes("三、验货问题</span><button"), "下厂员看不到验货「新增」入口");
   const newItem = st().orders.find(o => o.id === o1.id).inspections.flatMap(g => g.items).find(i => i.problem === "UI测试-发现的新问题");

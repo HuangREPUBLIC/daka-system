@@ -34,4 +34,4 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`跟单打卡系统已启动： http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`跟单系统已启动： http://localhost:${PORT}`));

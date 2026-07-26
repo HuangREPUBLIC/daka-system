@@ -16,7 +16,7 @@ const ok = (c, n) => { if (c) { pass++; console.log("PASS " + n); } else { fail+
   ok((mr.headers.get("cache-control") || "").includes("no-cache"), "manifest 不缓存");
   const m = await mr.json();
   ok(m.display === "standalone", "display=standalone");
-  ok(m.name === "跟单打卡系统" && m.short_name, "名称/简称完整");
+  ok(m.name === "跟单系统" && m.short_name, "名称/简称完整");
   ok(m.icons.length >= 3 && m.icons.some(i => i.purpose === "maskable"), "含 maskable 图标");
   ok(m.start_url === "/" && m.scope === "/", "start_url/scope 正确");
 

@@ -12,10 +12,11 @@ let state = {
   factories: { emb: [], prod: [], proc: [] }, orders: [], roles: [], seasons: [],
   chat: { contacts: [], activeId: null, contact: null, messages: [], draft: "", att: null },
   unread: { total: 0, byUser: {} },
-  myLogs: null
+  myLogs: null, feedback: null
 };
 let route = { v: "orders", id: null };
 let editingBasic = false, importPreview = null, importRaw = "";
+let showWelcome = false;   // 登录成功后短暂展示的欢迎界面（logo/公司名称/跟单系统）
 let filt = { season: "", sales: "", follower: "", kw: "" };
 let modalState = null;
 let deferredInstall = null;   // 安卓/桌面 Chrome 的原生安装事件
@@ -65,6 +66,8 @@ const isAdmin = () => me() && me().template === "admin";
 const canCreateOrder = () => me() && (me().template === "admin" || me().template === "sales");
 const roleLabelOf = u => (u ? (u.roleLabel || (u.role === "admin" ? "管理员" : u.role)) : "");
 const labelForRoleKey = k => k === "admin" ? "管理员" : ((state.roles.find(r => r.k === k) || {}).label || k);
+const COMPANY_NAME = "天津锦利国际贸易有限公司";
+const APP_NAME = "跟单系统";
 const APP_LOGO = `
   <svg viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <defs>
@@ -313,6 +316,7 @@ function go(v, id) {
   render(); window.scrollTo(0, 0);
   if (v === "account") A.loadMyLogs(state.me.id);
   if (v === "staffLogs" && id) A.loadMyLogs(id);
+  if (v === "admin") A.loadFeedback();
   if (v === "chat") { A.loadContacts(); A.refreshUnread(); }
 }
 
@@ -359,6 +363,7 @@ function tabbarHtml() {
 function render() {
   const app = $("app");
   if (!me()) { app.innerHTML = vLogin(); return; }
+  if (showWelcome) { app.innerHTML = vWelcome(); return; }
   const meta = pageMeta();
   const views = { orders: vOrders, new: vNew, detail: vDetail, chat: vChat,
     admin: vAdmin, account: vAccount, staffLogs: vStaffLogs };
@@ -378,7 +383,8 @@ function vLogin() {
   return `<div class="login-page"><div class="login-inner">
     <div class="login-brand">
       <div class="login-logo">${APP_LOGO}</div>
-      <h1 class="login-title">跟单打卡系统</h1>
+      <p class="login-company">${esc(COMPANY_NAME)}</p>
+      <h1 class="login-title">${esc(APP_NAME)}</h1>
     </div>
     <div class="login-card">
       <label class="lg-field"><span>手机号</span>
@@ -390,6 +396,18 @@ function vLogin() {
     <button class="btn block login-btn" onclick="A.login()">登 录</button>
     ${(isStandalone() || !isMobileDevice()) ? "" : `<button class="btn ghost block install-cta" onclick="A.install()">📲 安装到手机（像 App 一样用）</button>`}
   </div></div>`;
+}
+
+/* ---------- 登录成功后的欢迎界面：logo / 公司名称 / 跟单系统 ---------- */
+function vWelcome() {
+  return `<div class="login-page" onclick="A.dismissWelcome()">
+    <div class="login-inner">
+      <div class="login-brand">
+        <div class="login-logo">${APP_LOGO}</div>
+        <p class="login-company">${esc(COMPANY_NAME)}</p>
+        <h1 class="login-title">${esc(APP_NAME)}</h1>
+      </div>
+    </div></div>`;
 }
 
 /* ---------- 订单列表 ---------- */
@@ -405,7 +423,8 @@ function vOrders() {
     (!filt.season || o.season === filt.season) &&
     (!filt.sales || o.values.sales === filt.sales) &&
     (!filt.follower || o.values.follower === filt.follower) &&
-    (!filt.kw || [o.values.styleNo, o.values.styleName, o.values.style].join(" ").toLowerCase().includes(filt.kw.toLowerCase()))
+    (!filt.kw || [o.values.styleNo, o.values.styleName, o.values.style, o.values.factory, o.values.fabricFactory, o.values.embFactory]
+      .join(" ").toLowerCase().includes(filt.kw.toLowerCase()))
   ).slice().sort((a, b) => b.createdAt - a.createdAt);
   const opt = (arr, cur) => arr.map(([v, t]) =>
     `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(t)}</option>`).join("");
@@ -414,7 +433,7 @@ function vOrders() {
       <select class="in" onchange="A.setF('season',this.value)"><option value="">全部季节</option>${opt(seasonOptions("").map(s => [s, s]), filt.season)}</select>
       <select class="in" onchange="A.setF('sales',this.value)"><option value="">全部业务员</option>${opt(state.users.filter(u => u.template === "sales").map(u => [u.id, u.name]), filt.sales)}</select>
       <select class="in" onchange="A.setF('follower',this.value)"><option value="">全部下厂员</option>${opt(state.users.filter(u => u.template === "follower").map(u => [u.id, u.name]), filt.follower)}</select>
-      <input class="in" placeholder="搜货号 / 款式名" value="${esc(filt.kw)}" oninput="A.setFKw(this.value)">
+      <input class="in" placeholder="搜货号 / 款式名 / 工厂" value="${esc(filt.kw)}" oninput="A.setFKw(this.value)">
     </div></div></section>
   <section class="group">
     <div class="group-title">订单列表 · 共 ${list.length} 单</div>
@@ -627,15 +646,26 @@ function vDetail() {
     <button class="btn danger ghost block" onclick="A.delOrder('${o.id}')">删除此订单</button></div></section>` : ""}`;
 }
 
-/* ---------- 打卡记录（简洁列表） ---------- */
+/* ---------- 打卡记录（按订单分组，组内按时间倒序） ---------- */
 function logListHtml(rows) {
   if (!rows) return `<div class="empty">加载中…</div>`;
   if (!rows.length) return `<div class="empty">还没有打卡记录</div>`;
-  return `<div class="loglist">${rows.map(r => `<div class="logrow">
-    <div class="lr-top">
-      <a href="javascript:void(0)" onclick="go('detail','${r.orderId}')">${esc(r.styleNo || r.styleName || "订单")}</a>
-      <span>${esc(r.label)}</span><span class="num right">${fmtT(r.t)}</span></div>
-    <div class="lr-text">${esc(r.text)}</div></div>`).join("")}</div>`;
+  const groups = [];
+  const byOrder = new Map();
+  rows.forEach(r => {
+    let g = byOrder.get(r.orderId);
+    if (!g) { g = { orderId: r.orderId, styleNo: r.styleNo, styleName: r.styleName, items: [] }; byOrder.set(r.orderId, g); groups.push(g); }
+    g.items.push(r);
+  });
+  groups.forEach(g => g.items.sort((a, b) => b.t - a.t));
+  groups.sort((a, b) => b.items[0].t - a.items[0].t);
+  return groups.map(g => `<div class="card" style="margin-bottom:14px">
+    <div class="lf-head" style="padding:11px 16px 0">
+      <a href="javascript:void(0)" onclick="go('detail','${g.orderId}')">${esc(g.styleNo || "")} ${esc(g.styleName || "")}</a>
+      <span class="cnt right">共 ${g.items.length} 条</span></div>
+    <div class="loglist">${g.items.map(r => `<div class="logrow">
+      <div class="lr-top"><span>${esc(r.label)}</span><span class="num right">${fmtT(r.t)}</span></div>
+      <div class="lr-text">${esc(r.text)}</div></div>`).join("")}</div></div>`).join("");
 }
 
 /* ---------- 聊天 ---------- */
@@ -743,6 +773,16 @@ function vAdmin() {
   </section>
 
   <section class="group">
+    <div class="group-title">数据导出</div>
+    <div class="card"><div class="card-pad">
+      <p style="font-size:13.5px;color:var(--ink-2);margin:0 0 12px">导出订单全部内容（订单基本信息、生产进度、验货问题、跟单小结）为 Excel(.xlsx) 文件，照片以链接形式列出</p>
+      <label class="field" style="padding-left:0;padding-right:0;border:0"><span>按季节筛选（可选）</span>
+        <select class="in" id="exp-season"><option value="">全部季节</option>${
+          state.seasons.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("")}</select></label>
+      <button class="btn" onclick="A.exportData()">导出订单数据</button></div></div>
+  </section>
+
+  <section class="group">
     <div class="group-title">职位管理</div>
     <div class="card"><div class="card-pad">
       <div style="display:flex;gap:8px;flex-wrap:wrap">${state.roles.map(r => `<span class="tag role">${esc(r.label)}
@@ -792,10 +832,12 @@ function vAdmin() {
   </section>
 
   <section class="group">
-    <div class="group-title">数据导出</div>
-    <div class="card"><div class="card-pad">
-      <p style="font-size:13.5px;color:var(--ink-2);margin:0 0 12px">导出全部订单为 Excel(.xlsx) 文件</p>
-      <button class="btn" onclick="A.exportData()">导出订单数据</button></div></div>
+    <div class="group-title">意见反馈${state.feedback ? ` · 共 ${state.feedback.length} 条` : ""}</div>
+    <div class="card">${state.feedback && state.feedback.length
+      ? `<ul class="log" style="padding:4px 16px">${state.feedback.map(f => `<li>
+          <div class="meta"><b>${esc(f.byName)}</b><span class="num">${fmtT(f.createdAt)}</span></div>
+          <div class="txt">${esc(f.text)}</div></li>`).join("")}</ul>`
+      : `<div class="empty">${state.feedback ? "还没有反馈" : "加载中…"}</div>`}</div>
   </section>`;
 }
 
@@ -821,6 +863,13 @@ function vAccount() {
   <section class="group">
     <div class="group-title">我的打卡记录${state.myLogs ? ` · 共 ${state.myLogs.length} 条` : ""}</div>
     <div class="card">${logListHtml(state.myLogs)}</div>
+  </section>
+
+  <section class="group">
+    <div class="group-title">意见反馈</div>
+    <div class="card"><div class="card-pad">
+      <p style="font-size:13.5px;color:var(--ink-2);margin:0 0 12px">对系统有什么建议或发现什么问题，都可以写在这里，管理员会看到</p>
+      <button class="btn ghost" onclick="A.submitFeedback()">提交反馈</button></div></div>
   </section>
 
   <section class="group">
@@ -874,8 +923,14 @@ const A = {
     try {
       const r = await api("POST", "/login", { phone, password });
       state.token = r.token; localStorage.setItem("daka_token", r.token);
-      await refresh(); go("orders"); toast("欢迎，" + r.user.name);
+      await refresh();
+      showWelcome = true; go("orders");
+      setTimeout(A.dismissWelcome, 1500);
     } catch (e) { toast((e && e.error) || "登录失败"); }
+  },
+  dismissWelcome() {
+    if (!showWelcome) return;
+    showWelcome = false; render();
   },
   async install() {
     if (isStandalone()) return toast("已经是从主屏打开的了");
@@ -1128,6 +1183,17 @@ const A = {
     catch (e) { state.myLogs = []; toast((e && e.error) || "读取失败"); }
     render();
   },
+  submitFeedback() {
+    modal({ title: "意见反馈", input: "textarea", okText: "提交",
+      onOk: v => { if (v && v.trim()) run(() => api("POST", "/feedback", { text: v.trim() }), "感谢反馈，已提交给管理员"); } });
+  },
+  async loadFeedback() {
+    if (!isAdmin()) return;
+    state.feedback = null;
+    try { state.feedback = await api("GET", "/feedback"); }
+    catch (e) { state.feedback = []; }
+    render();
+  },
   viewStaffLogs(id) { go("staffLogs", id); },
 
   /* ---- 聊天 ---- */
@@ -1208,11 +1274,13 @@ const A = {
   async exportData() {
     if (!isAdmin()) return toast("仅管理员可导出");
     try {
-      const r = await fetch("/api/export", { headers: { Authorization: "Bearer " + state.token } });
+      const season = ($("exp-season") || {}).value || "";
+      const qs = season ? "?season=" + encodeURIComponent(season) : "";
+      const r = await fetch("/api/export" + qs, { headers: { Authorization: "Bearer " + state.token } });
       if (!r.ok) throw await r.json().catch(() => ({ error: "导出失败" }));
       const blob = await r.blob(), url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = `订单导出-${todayStr()}.xlsx`;
+      a.href = url; a.download = `订单导出-${season || "全部季节"}-${todayStr()}.xlsx`;
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
       toast("已开始下载");
     } catch (e) { toast((e && e.error) || "导出失败"); }

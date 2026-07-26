@@ -1,6 +1,6 @@
 {
-  "name": "跟单打卡系统",
-  "short_name": "跟单打卡",
+  "name": "跟单系统",
+  "short_name": "跟单",
   "description": "服装生产进度跟踪 · 现场打卡 · 实时同步",
   "start_url": "/",
   "scope": "/",

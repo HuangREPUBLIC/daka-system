@@ -1,4 +1,4 @@
-# 打卡系统 · 服装生产跟单打卡系统
+# 跟单系统 · 服装生产跟单打卡系统
 
 公司内部使用的生产进度跟踪工具，替代 Excel 表格手工记录订单进度的方式。
 
@@ -15,8 +15,8 @@
 需要 **Node.js 22 或更高版本**（用到了 Node 内置的 `node:sqlite`，无需安装数据库）。
 
 ```bash
-git clone https://github.com/HuangREPUBLIC/daka-system.git
-cd daka-system
+git clone https://github.com/HuangREPUBLIC/gendan-system.git
+cd gendan-system
 npm install
 npm start
 ```
@@ -49,7 +49,7 @@ npm start
 
 ```bash
 npm install -g pm2
-pm2 start server/index.js --name daka-system
+pm2 start server/index.js --name gendan-system
 pm2 save && pm2 startup
 ```
 
@@ -182,16 +182,16 @@ npm test
 
 | 文件 | 项数 | 覆盖内容 |
 |---|---|---|
-| `api.test.js` | 36 | 登录、各职位权限边界、订单增删改、导入、职位修改、导出、照片、字段防重名 |
+| `api.test.js` | 40 | 登录、各职位权限边界、订单增删改、导入、职位修改、导出（含多分表与季节筛选）、照片、字段防重名 |
 | `rehire.test.js` | 5 | 软删除与手机号复用（返聘） |
-| `chat.test.js` | 50 | 自定义职位与权限继承、私聊收发、未读、私密性隔离、附件上传、导入格式、季节管理增删权限 |
+| `chat.test.js` | 56 | 自定义职位与权限继承、私聊收发、未读、私密性隔离、附件上传、导入格式、季节管理增删权限、意见反馈提交与查看权限 |
 | `migrate.test.js` | 15 | 老数据库升级自动补齐配置（含「面料」迁移、老订单 subs/inspections 结构迁移、季节配置补齐） |
 | `pwa.test.js` | 18 | manifest、Service Worker、图标、iOS 全屏 meta、锁定缩放 |
 | `production.test.js` | 34 | 主厂/动态加工点增删改权限、验货「发现问题/整改情况」分权限、补充说明、无负责人边界 |
 | `e2e.test.js` | 30 | jsdom 真实加载前端，走完整下单/打卡/导入流程 |
-| `ui-chat.test.js` | 68 | 聊天界面、Tab 栏、弹窗、季节筛选与季节管理、职位管理、日期中文化、生产进度/验货新界面、大图双指缩放 |
+| `ui-chat.test.js` | 78 | 聊天界面、Tab 栏、弹窗、季节筛选与季节管理、按工厂搜索、职位管理、数据导出入口位置、意见反馈、打卡记录按订单分组、登录欢迎界面、日期中文化、生产进度/验货新界面、大图双指缩放 |
 
-合计 **256 项**。
+合计 **276 项**。
 
 > 升级已有部署时直接 `git pull && npm install && 重启` 即可，服务端启动会自动补齐新增的配置项，不需要手工改数据库。
 

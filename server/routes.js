@@ -104,6 +104,25 @@ router.post("/password/change", (req, res) => {
 });
 
 /* =========================================================
+ *  意见反馈：任何登录用户可提交，只有管理员能看
+ * ========================================================= */
+router.post("/feedback", (req, res) => {
+  const text = String((req.body || {}).text || "").trim();
+  if (!text) return res.status(400).json({ error: "请填写反馈内容" });
+  db.prepare("INSERT INTO feedback(id,by_user,text,created_at) VALUES(?,?,?,?)")
+    .run(uid(), req.user.id, text, Date.now());
+  res.json({ ok: true });
+});
+
+router.get("/feedback", A.adminRequired, (req, res) => {
+  const users = db.prepare("SELECT id,name FROM users").all();
+  const nameOf = id => (users.find(u => u.id === id) || {}).name || id || "";
+  const rows = db.prepare("SELECT * FROM feedback ORDER BY created_at DESC").all()
+    .map(r => ({ id: r.id, text: r.text, createdAt: r.created_at, byName: nameOf(r.by_user) }));
+  res.json(rows);
+});
+
+/* =========================================================
  *  员工账号管理（管理员）
  * ========================================================= */
 router.get("/users", A.adminRequired, (req, res) => {
@@ -674,28 +693,65 @@ router.post("/import/parse", (req, res, next) => {
   res.json({ rows, sheet: wb.SheetNames[0], encoding });
 });
 
-/* ---------- 导出 Excel（管理员）---------- */
+/* ---------- 导出 Excel（管理员）：订单基本信息 + 生产进度 + 验货问题 + 跟单小结，可按季节筛选 ---------- */
 router.get("/export", A.adminRequired, (req, res) => {
   const fields = getSetting("fields", { order: [], production: [] });
   const users = db.prepare("SELECT id,name FROM users").all();
   const nameOf = id => (users.find(u => u.id === id) || {}).name || id || "";
+  const seasonFilter = String(req.query.season || "").trim();
+  let orders = allOrdersPublic();
+  if (seasonFilter) orders = orders.filter(o => o.season === seasonFilter);
+  const styleOf = o => o.values.styleNo || o.values.styleName || o.id;
+  const photosText = arr => (arr || []).join("、");
+  const timeText = t => t ? new Date(t).toLocaleString("zh-CN") : "";
+
+  // 表一：订单基本信息（与原有逻辑一致，仍是每个字段取最新一条打卡摘要）
   const cols = [...fields.order, ...fields.production];
-  const header = ["季节", ...cols.map(f => f.label)];
-  const rows = allOrdersPublic().map(o => [o.season, ...cols.map(f => {
+  const header1 = ["季节", "货号", ...cols.map(f => f.label)];
+  const rows1 = orders.map(o => [o.season, styleOf(o), ...cols.map(f => {
     if (f.type === "log") {
       const arr = (o.logs[f.k] || []).slice().sort((a, b) => b.t - a.t);
       const l = arr[0];
-      return l ? `${l.text}（${l.byName} ${new Date(l.t).toLocaleString("zh-CN")}）` : "";
+      return l ? `${l.text}（${l.byName} ${timeText(l.t)}）` : "";
     }
     if (f.type === "image") return o.values.img ? "（有图）" : "";
     if (f.type === "user-sales" || f.type === "user-follower") return nameOf(o.values[f.k]);
     return o.values[f.k] || "";
   })]);
-  const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+
+  // 表二：生产进度（主厂 + 每个动态加工点 + 面料/绣印/产前样/裁剪/整烫/包装 的每一条打卡）
+  const header2 = ["季节", "货号", "环节", "内容", "记录人", "时间", "照片"];
+  const rows2 = [];
+  orders.forEach(o => {
+    (o.mainLog || []).forEach(e => rows2.push([o.season, styleOf(o), "主厂", e.text || "", e.byName, timeText(e.t), photosText(e.photos)]));
+    (o.subs || []).forEach(s => (s.log || []).forEach(e =>
+      rows2.push([o.season, styleOf(o), s.name, e.text || "", e.byName, timeText(e.t), photosText(e.photos)])));
+    [...fields.order, ...fields.production].filter(f => f.type === "log").forEach(f =>
+      (o.logs[f.k] || []).forEach(e => rows2.push([o.season, styleOf(o), f.label, e.text || "", e.byName, timeText(e.t), photosText(e.photos)])));
+  });
+
+  // 表三：验货问题（发现问题/整改情况/补充说明 各自独立一行方便查看）
+  const header3 = ["季节", "货号", "发现问题", "发现人", "发现时间", "整改情况", "整改人", "整改时间", "补充说明", "照片"];
+  const rows3 = [];
+  orders.forEach(o => (o.inspections || []).forEach(g => (g.items || []).forEach(it => rows3.push([
+    o.season, styleOf(o), it.problem || "", it.problemByName || "", timeText(it.problemAt),
+    it.fix || "（待整改）", it.fixByName || "", timeText(it.fixAt),
+    (it.notes || []).map(n => `${n.byName}：${n.text}`).join("；"), photosText(g.photos)
+  ]))));
+
+  // 表四：跟单小结
+  const header4 = ["季节", "货号", "记录人", "时间", "内容", "照片"];
+  const rows4 = [];
+  orders.forEach(o => (o.followIssues || []).forEach(e =>
+    rows4.push([o.season, styleOf(o), e.byName, timeText(e.t), e.text || "", photosText(e.photos)])));
+
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "订单");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header1, ...rows1]), "订单基本信息");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header2, ...rows2]), "生产进度");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header3, ...rows3]), "验货问题");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([header4, ...rows4]), "跟单小结");
   const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
-  const fname = `订单导出-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  const fname = `订单导出-${seasonFilter || "全部季节"}-${new Date().toISOString().slice(0, 10)}.xlsx`;
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(fname)}`);
   res.send(buf);

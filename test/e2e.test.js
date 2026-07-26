@@ -24,17 +24,17 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const app = () => doc.getElementById("app").innerHTML;
   const A = window.A;
 
-  ok(app().includes("跟单打卡系统") && app().includes("lg-phone") && app().includes("lg-pass"), "未登录显示登录页");
+  ok(app().includes("跟单系统") && app().includes("lg-phone") && app().includes("lg-pass"), "未登录显示登录页");
 
   // 错误密码
   doc.getElementById("lg-phone").value = "13800000000";
   doc.getElementById("lg-pass").value = "wrong";
-  await A.login(); await sleep(250);
+  await A.login(); A.dismissWelcome(); await sleep(250);
   ok(!app().includes("订单列表"), "错误密码不能登录");
 
   // 管理员登录
   doc.getElementById("lg-pass").value = "123456";
-  await A.login(); await sleep(400);
+  await A.login(); A.dismissWelcome(); await sleep(400);
   ok(app().includes("订单列表") && app().includes('data-tab="admin"'), "管理员登录成功（含管理 Tab）");
   ok(app().includes("SS27-T012") && app().includes("女装印花短袖T恤"), "订单列表来自服务端");
   ok(window.localStorage.getItem("daka_token"), "token 已保存");
@@ -117,7 +117,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   A.forceLogout(); await sleep(150);
   doc.getElementById("lg-phone").value = "13877778888"; // 刘敏
   doc.getElementById("lg-pass").value = "123456";
-  await A.login(); await sleep(400);
+  await A.login(); A.dismissWelcome(); await sleep(400);
   ok(!app().includes('data-tab="admin"') && !app().includes("go('new')"), "下厂员看不到管理 Tab 和新建订单入口");
   window.go("detail", o1.id); await sleep(250); // o1 归王建国
   ok(!app().includes("txt-cutting"), "下厂员在别人订单上没有打卡框");
