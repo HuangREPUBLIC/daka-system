@@ -60,6 +60,43 @@ ok(migrated.includes("custom1"), "迁移过程不影响管理员自己加的字�
 const keys = JSON.parse(migrated);
 ok(keys.indexOf("fabricFactory") < keys.indexOf("embFactory"), "面料工厂排在绣印工厂前面");
 
+// 5) 老结构的订单（subs 是固定4条、无 id；inspections 用 date+items 无 id）
+//    要能安全迁移到新的"生产进度(mainLog+动态加工点)"/"验货问题(id化)"结构，且可重复运行
+const legacyOrder = {
+  values: { styleNo: "FA9926", styleName: "MACU", factory: "滨州英氏" },
+  logs: {},
+  subs: [
+    { name: "主厂", factory: "", log: [{ id: "e1", by: "u1", byName: "老板", t: 1785053131921, text: "上衣下500，裤子下车200条", photos: [] }] },
+    { name: "加工厂2", factory: "", log: [{ id: "e2", by: "u1", byName: "老板", t: 1785054735481, text: "", photos: ["/uploads/x.jpg"] }] },
+    { name: "加工厂3", factory: "", log: [] },
+    { name: "加工厂4", factory: "", log: [] }
+  ],
+  inspections: [{ id: "g1", date: "2026-07-26", by: "u1", byName: "老板", t: 1785057640886,
+    items: [{ problem: "裤腰吃抻不匀", fix: "" }], photos: ["/uploads/y.jpg"] }],
+  followIssues: []
+};
+r = spawnSync(process.execPath, ["-e", `
+  process.env.DATA_DIR = ${JSON.stringify(DATA_DIR)};
+  const d = require(${JSON.stringify(dbPath)});
+  d.seedIfEmpty();
+  d.db.prepare("DELETE FROM orders").run();
+  d.db.prepare("INSERT INTO orders(id,season,created_by,created_at,updated_at,data) VALUES(?,?,?,?,?,?)")
+    .run("legacy1", "SS2026", "u1", 1, 1, JSON.stringify(${JSON.stringify(legacyOrder)}));
+  d.ensureDefaults();
+  d.ensureDefaults();
+  console.log(d.db.prepare("SELECT data FROM orders WHERE id='legacy1'").get().data);
+`], { encoding: "utf8", env: Object.assign({}, process.env, { DATA_DIR }) });
+ok(r.status === 0, "老结构订单迁移两次都不报错(幂等)");
+const migratedOrder = JSON.parse((r.stdout.trim().split("\n").pop() || "{}"));
+ok(Array.isArray(migratedOrder.mainLog) && migratedOrder.mainLog.length === 1
+  && migratedOrder.mainLog[0].text.includes("上衣下500"), "老「主厂」打卡记录挪进 mainLog，内容不丢");
+ok(!migratedOrder.subs.some(s => s.name === "主厂"), "subs 里不再重复出现「主厂」");
+ok(migratedOrder.subs.length === 1 && migratedOrder.subs[0].name === "加工厂2" && !!migratedOrder.subs[0].id, "有真实打卡的加工点保留且补上 id");
+ok(!migratedOrder.subs.some(s => s.name === "加工厂3" || s.name === "加工厂4"), "从未使用的默认占位加工点被清掉");
+const migratedItem = migratedOrder.inspections[0].items[0];
+ok(migratedOrder.inspections[0].date === undefined, "验货记录不再有 date 字段");
+ok(!!migratedItem.id && migratedItem.problemBy === "u1" && Array.isArray(migratedItem.notes), "验货 item 补上 id/问题作者/补充说明数组");
+
 fs.rmSync(DATA_DIR, { recursive: true, force: true });
 console.log(`\n结果：PASS ${pass}, FAIL ${fail}`);
 process.exit(fail ? 1 : 0);

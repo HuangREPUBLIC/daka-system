@@ -113,6 +113,55 @@ function ensureDefaults() {
   } else if (!fields) {
     console.warn("[db] 警告：缺少字段配置");
   }
+  migrateOrdersSchema();
+}
+
+/**
+ * 老库的订单迁移到新的「生产进度」「验货问题」数据结构：
+ *  - subs 里叫"主厂"且没有 id 的那条 -> 挪进 mainLog，从 subs 里删掉
+ *  - 其余 subs 补上 id（老结构没有），变成正式的动态加工点
+ *  - 从没打过卡、还叫默认名字（加工厂2/3/4）的占位条目直接清掉，减少噪音
+ *  - inspections：去掉 date，item 补 id/problemBy/fixBy/notes
+ * 每一步都先判断"是不是已经是新结构"，可以放心重复跑（幂等）。
+ */
+function migrateOrdersSchema() {
+  const rows = db.prepare("SELECT id, data FROM orders").all();
+  let migrated = 0;
+  rows.forEach(r => {
+    const d = JSON.parse(r.data);
+    let touched = false;
+    if (!Array.isArray(d.mainLog)) { d.mainLog = []; touched = true; }
+    if (!Array.isArray(d.subs)) { d.subs = []; touched = true; }
+    else {
+      const mainIdx = d.subs.findIndex(s => s.name === "主厂" && !s.id);
+      if (mainIdx >= 0) {
+        const main = d.subs[mainIdx];
+        if (Array.isArray(main.log) && main.log.length) d.mainLog = d.mainLog.concat(main.log);
+        d.subs.splice(mainIdx, 1);
+        touched = true;
+      }
+      d.subs.forEach(s => {
+        if (!s.id) { s.id = uid(); touched = true; }
+        if ("factory" in s) { delete s.factory; touched = true; }
+      });
+      const before = d.subs.length;
+      d.subs = d.subs.filter(s => !(/^加工厂[234]$/.test(s.name) && (!s.log || !s.log.length)));
+      if (d.subs.length !== before) touched = true;
+    }
+    if (Array.isArray(d.inspections)) {
+      d.inspections.forEach(g => {
+        if (g.date !== undefined) { delete g.date; touched = true; }
+        (g.items || []).forEach(it => {
+          if (!it.id) { it.id = uid(); touched = true; }
+          if (it.problemBy === undefined) { it.problemBy = g.by; it.problemByName = g.byName; it.problemAt = g.t; touched = true; }
+          if (it.fixBy === undefined) { it.fixBy = null; it.fixByName = it.fixByName || ""; it.fixAt = it.fixAt || null; touched = true; }
+          if (!Array.isArray(it.notes)) { it.notes = []; touched = true; }
+        });
+      });
+    }
+    if (touched) { db.prepare("UPDATE orders SET data=? WHERE id=?").run(JSON.stringify(d), r.id); migrated++; }
+  });
+  if (migrated) console.log(`[db] 已迁移 ${migrated} 个订单到新版生产进度/验货数据结构`);
 }
 
 /* ---------- 首次运行填充演示数据 ---------- */
