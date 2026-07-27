@@ -58,7 +58,9 @@ db.exec(`
     id TEXT PRIMARY KEY,
     by_user TEXT NOT NULL,
     text TEXT NOT NULL,
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    handled INTEGER NOT NULL DEFAULT 0,
+    handled_at INTEGER
   );
 `);
 
@@ -101,6 +103,12 @@ function ensureDefaults() {
     db.exec("ALTER TABLE messages ADD COLUMN attachment TEXT");
     console.log("[db] 已为 messages 表补上 attachment 列");
   }
+  // 老库补列：意见反馈的已处理标记
+  if (!columnExists("feedback", "handled")) {
+    db.exec("ALTER TABLE feedback ADD COLUMN handled INTEGER NOT NULL DEFAULT 0");
+    db.exec("ALTER TABLE feedback ADD COLUMN handled_at INTEGER");
+    console.log("[db] 已为 feedback 表补上已处理标记列");
+  }
   const roles = getSetting("roles", null);
   if (!roles || !roles.length) {
     setSetting("roles", DEFAULT_ROLES);
@@ -136,6 +144,19 @@ function ensureDefaults() {
     }
   } else if (!fields) {
     console.warn("[db] 警告：缺少字段配置");
+  }
+  // 老库「生产厂」字段挂在"二、生产明细"下，改成挂到"一、订单明细"，排在面料工厂前面
+  if (fields && fields.production && fields.order) {
+    const idx = fields.production.findIndex(f => f.k === "factory");
+    if (idx >= 0) {
+      const [factoryField] = fields.production.splice(idx, 1);
+      const fabIdx = fields.order.findIndex(f => f.k === "fabricFactory");
+      const embIdx = fields.order.findIndex(f => f.k === "embFactory");
+      const insertAt = fabIdx >= 0 ? fabIdx : (embIdx >= 0 ? embIdx : fields.order.length);
+      fields.order.splice(insertAt, 0, factoryField);
+      setSetting("fields", fields);
+      console.log("[db] 已将「生产厂」字段从生产明细挪到订单明细(面料工厂前面)");
+    }
   }
   migrateOrdersSchema();
 }
@@ -227,12 +248,12 @@ function seedIfEmpty() {
       { k: "deadline", label: "订单交期", type: "date" },
       { k: "fabricProg", label: "面料进度", type: "log" },
       { k: "embProg", label: "绣印进度", type: "log" },
+      { k: "factory", label: "生产厂", type: "factory-prod" },
       { k: "fabricFactory", label: "面料工厂", type: "factory-fabric" },
       { k: "embFactory", label: "绣印工厂", type: "factory-emb" }
     ],
     production: [
       { k: "follower", label: "下厂员", type: "user-follower", core: true },
-      { k: "factory", label: "生产厂", type: "factory-prod" },
       { k: "preSample", label: "产前样进度", type: "log" },
       { k: "cutting", label: "裁剪进度", type: "log" },
       { k: "ironing", label: "整烫进度", type: "log" },

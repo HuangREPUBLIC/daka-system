@@ -10,7 +10,8 @@ async function call(m, p, t, b) {
 }
 (async () => {
   const aT = (await call("POST", "/login", null, { phone: "13800000000", password: "123456" })).j.token;
-  const sT = (await call("POST", "/login", null, { phone: "13811112222", password: "123456" })).j.token; // 陈晓芳 sales
+  const sT = (await call("POST", "/login", null, { phone: "13811112222", password: "123456" })).j.token; // 陈晓芳 sales(o1 的业务员)
+  const s2T = (await call("POST", "/login", null, { phone: "13833334444", password: "123456" })).j.token; // 林志远 sales(与 o1 无关)
   const fT = (await call("POST", "/login", null, { phone: "13855556666", password: "123456" })).j.token; // 王建国 follower(负责 o1)
   const f2T = (await call("POST", "/login", null, { phone: "13877778888", password: "123456" })).j.token; // 刘敏 follower(负责 o2，与 o1 无关)
 
@@ -23,18 +24,24 @@ async function call(m, p, t, b) {
   ok(Array.isArray(o1.subs) && o1.subs.length === 1 && o1.subs[0].name.includes("加工点1"), "种子数据: 动态加工点已生成");
   ok(o1.inspections[0].items[0].fix && o1.inspections[0].items[0].fixBy, "种子数据: 验货记录已含 problem+fix");
 
-  // ---- 主厂打卡(mainLog)：权限与生产明细打卡一致 ----
-  ok((await call("POST", `/orders/${o1.id}/logs`, fT, { key: "mainLog", text: "主厂新打卡" })).status === 200, "本单下厂员在主厂(mainLog)打卡");
-  ok((await call("POST", `/orders/${o1.id}/logs`, sT, { key: "mainLog", text: "越权" })).status === 403, "业务员不能在主厂打卡");
-  ok((await call("POST", `/orders/${o1.id}/logs`, f2T, { key: "mainLog", text: "越权2" })).status === 403, "非本单下厂员不能在主厂打卡");
+  // ---- 主厂打卡(mainLog)：生产工序/车工人数/预计下车时间是必填项 ----
+  const mainLogBody = { key: "mainLog", text: "主厂新打卡", process: "车缝", workers: "12", estDone: "2026-08-01" };
+  ok((await call("POST", `/orders/${o1.id}/logs`, fT, { key: "mainLog", text: "缺必填项" })).status === 400, "主厂打卡不填生产工序/车工人数/预计下车时间报错");
+  ok((await call("POST", `/orders/${o1.id}/logs`, fT, mainLogBody)).status === 200, "本单下厂员在主厂(mainLog)打卡(含必填项)");
+  ok((await call("POST", `/orders/${o1.id}/logs`, sT, Object.assign({}, mainLogBody, { text: "业务员帮着记录" }))).status === 200, "本单业务员也能在主厂(mainLog)打卡");
+  ok((await call("POST", `/orders/${o1.id}/logs`, s2T, mainLogBody)).status === 403, "非本单业务员不能在主厂打卡");
+  ok((await call("POST", `/orders/${o1.id}/logs`, f2T, mainLogBody)).status === 403, "非本单下厂员不能在主厂打卡");
 
-  // ---- 加工点：下厂员自己决定加/改名/打卡，只有管理员能删 ----
+  // ---- 加工点：下厂员/本单业务员都能加/改名，只有管理员能删；跟这单无关的人不行 ----
   const addSub = await call("POST", `/orders/${o1.id}/subs`, fT, { name: "加工点2（临时外发）" });
   ok(addSub.status === 200 && addSub.j.subs.length === 2, "下厂员新增加工点，无需管理员预配置");
-  ok((await call("POST", `/orders/${o1.id}/subs`, sT, { name: "业务员想加" })).status === 403, "非本单下厂员/业务员不能加加工点");
+  ok((await call("POST", `/orders/${o1.id}/subs`, sT, { name: "业务员加的加工点" })).status === 200, "本单业务员也能加加工点");
+  ok((await call("POST", `/orders/${o1.id}/subs`, s2T, { name: "越权想加" })).status === 403, "非本单业务员不能加加工点");
+  ok((await call("POST", `/orders/${o1.id}/subs`, f2T, { name: "越权想加2" })).status === 403, "非本单下厂员不能加加工点");
   const subId = addSub.j.subs[1].id;
   ok((await call("PATCH", `/orders/${o1.id}/subs/${subId}`, fT, { name: "改名后的加工点" })).status === 200, "下厂员改加工点名称");
-  ok((await call("POST", `/orders/${o1.id}/logs`, fT, { key: "sub:" + subId, text: "在动态加工点打卡" })).status === 200, "在新加的加工点打卡");
+  ok((await call("POST", `/orders/${o1.id}/logs`, fT, { key: "sub:" + subId, text: "在动态加工点打卡", process: "锁边", workers: "5", estDone: "2026-08-02" })).status === 200, "在新加的加工点打卡(含必填项)");
+  ok((await call("POST", `/orders/${o1.id}/logs`, fT, { key: "sub:" + subId, text: "缺必填项" })).status === 400, "加工点打卡不填必填项报错");
   ok((await call("DELETE", `/orders/${o1.id}/subs/${subId}`, fT)).status === 403, "非管理员不能删加工点");
   ok((await call("DELETE", `/orders/${o1.id}/subs/${subId}`, aT)).status === 200, "管理员可以删加工点");
 

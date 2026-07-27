@@ -49,6 +49,19 @@ async function call(m,p,t,b){const h={"Content-Type":"application/json"};if(t)h.
   const fbList=await call("GET","/feedback",aT);
   ok(fbList.status===200 && fbList.j.length>=2,"管理员能看到全部反馈");
   ok(fbList.j.some(f=>f.text==="建议加一个导出按季度筛选的功能" && f.byName==="王建国"),"反馈内容和提交人姓名正确");
+  ok(fbList.j.every(f=>f.handled===false),"新反馈默认未处理");
+  const fbId=fbList.j.find(f=>f.text==="建议加一个导出按季度筛选的功能").id;
+
+  // 意见反馈：提交人能查看自己的反馈(含处理状态)，看不到别人的；管理员能标记已处理
+  const mine=await call("GET","/feedback/mine",wT);
+  ok(mine.status===200 && mine.j.length===1 && mine.j[0].text==="建议加一个导出按季度筛选的功能" && mine.j[0].handled===false,
+    "提交人能看到自己的反馈，默认未处理");
+  ok((await call("PATCH",`/feedback/${fbId}`,wT,{handled:true})).status===403,"非管理员不能标记已处理");
+  ok((await call("PATCH",`/feedback/${fbId}`,aT,{handled:true})).status===200,"管理员可以标记已处理");
+  const mineAfter=await call("GET","/feedback/mine",wT);
+  ok(mineAfter.j[0].handled===true,"提交人能看到自己的反馈已被标记处理");
+  ok((await call("PATCH",`/feedback/${fbId}`,aT,{handled:false})).status===200,"管理员可以再标记回未处理");
+  ok((await call("PATCH","/feedback/不存在的id",aT,{handled:true})).status===404,"标记不存在的反馈报错");
 
   // 聊天
   const cT=(await call("POST","/login",null,{phone:"13811112222",password:"123456"})).j.token; // 陈晓芳

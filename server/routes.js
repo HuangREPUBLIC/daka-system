@@ -104,7 +104,7 @@ router.post("/password/change", (req, res) => {
 });
 
 /* =========================================================
- *  意见反馈：任何登录用户可提交，只有管理员能看
+ *  意见反馈：任何登录用户可提交/查看自己的；管理员能看全部、标记已处理
  * ========================================================= */
 router.post("/feedback", (req, res) => {
   const text = String((req.body || {}).text || "").trim();
@@ -118,8 +118,25 @@ router.get("/feedback", A.adminRequired, (req, res) => {
   const users = db.prepare("SELECT id,name FROM users").all();
   const nameOf = id => (users.find(u => u.id === id) || {}).name || id || "";
   const rows = db.prepare("SELECT * FROM feedback ORDER BY created_at DESC").all()
-    .map(r => ({ id: r.id, text: r.text, createdAt: r.created_at, byName: nameOf(r.by_user) }));
+    .map(r => ({ id: r.id, text: r.text, createdAt: r.created_at, byName: nameOf(r.by_user),
+      handled: !!r.handled, handledAt: r.handled_at }));
   res.json(rows);
+});
+
+// 提交人查看自己提交过的反馈，能看到管理员是否已处理
+router.get("/feedback/mine", (req, res) => {
+  const rows = db.prepare("SELECT * FROM feedback WHERE by_user = ? ORDER BY created_at DESC").all(req.user.id)
+    .map(r => ({ id: r.id, text: r.text, createdAt: r.created_at, handled: !!r.handled, handledAt: r.handled_at }));
+  res.json(rows);
+});
+
+router.patch("/feedback/:id", A.adminRequired, (req, res) => {
+  const row = db.prepare("SELECT * FROM feedback WHERE id = ?").get(req.params.id);
+  if (!row) return res.status(404).json({ error: "反馈不存在" });
+  const handled = !!(req.body || {}).handled;
+  db.prepare("UPDATE feedback SET handled = ?, handled_at = ? WHERE id = ?")
+    .run(handled ? 1 : 0, handled ? Date.now() : null, req.params.id);
+  res.json({ ok: true, handled });
 });
 
 /* =========================================================
@@ -316,15 +333,21 @@ router.delete("/orders/:id", A.adminRequired, (req, res) => {
 router.post("/orders/:id/logs", (req, res) => {
   const o = loadOrder(req.params.id);
   if (!o) return res.status(404).json({ error: "订单不存在" });
-  const { key, text } = req.body || {};
+  const { key, text, process, workers, estDone } = req.body || {};
   const section = sectionOfKey(key);
   if (!A.canAddLog(req.user, o, section)) return res.status(403).json({ error: "你没有权限在此订单打卡" });
   const list = listForKey(o, key);
   if (!list) return res.status(400).json({ error: "字段不存在" });
   const t = String(text || "").trim();
   const photos = cleanPhotos((req.body || {}).photos);
-  if (!t && !photos.length) return res.status(400).json({ error: "请填写打卡内容或添加照片" });
-  list.push({ id: uid(), by: req.user.id, byName: req.user.name, t: Date.now(), text: t, photos });
+  const entry = { id: uid(), by: req.user.id, byName: req.user.name, t: Date.now(), text: t, photos };
+  // 主厂/加工点打卡：生产工序/车工人数/预计下车时间是必填项，其它进度字段(面料进度/裁剪进度等)仍是纯文字打卡
+  if (key === "mainLog" || String(key).startsWith("sub:")) {
+    const proc = String(process || "").trim(), wk = String(workers || "").trim(), est = String(estDone || "").trim();
+    if (!proc || !wk || !est) return res.status(400).json({ error: "请填写生产工序、车工人数、预计下车时间" });
+    Object.assign(entry, { process: proc, workers: wk, estDone: est });
+  } else if (!t && !photos.length) return res.status(400).json({ error: "请填写打卡内容或添加照片" });
+  list.push(entry);
   saveOrder(o);
   res.json(orderPublic(loadOrder(o.id)));
 });
@@ -716,18 +739,19 @@ router.get("/export", A.adminRequired, (req, res) => {
     }
     if (f.type === "image") return o.values.img ? "（有图）" : "";
     if (f.type === "user-sales" || f.type === "user-follower") return nameOf(o.values[f.k]);
-    return o.values[f.k] || "";
+    const v = o.values[f.k];
+    return Array.isArray(v) ? v.join("、") : (v || "");
   })]);
 
   // 表二：生产进度（主厂 + 每个动态加工点 + 面料/绣印/产前样/裁剪/整烫/包装 的每一条打卡）
-  const header2 = ["季节", "货号", "环节", "内容", "记录人", "时间", "照片"];
+  const header2 = ["季节", "货号", "环节", "生产工序", "车工人数", "预计下车时间", "内容", "记录人", "时间", "照片"];
   const rows2 = [];
   orders.forEach(o => {
-    (o.mainLog || []).forEach(e => rows2.push([o.season, styleOf(o), "主厂", e.text || "", e.byName, timeText(e.t), photosText(e.photos)]));
+    (o.mainLog || []).forEach(e => rows2.push([o.season, styleOf(o), "主厂", e.process || "", e.workers || "", e.estDone || "", e.text || "", e.byName, timeText(e.t), photosText(e.photos)]));
     (o.subs || []).forEach(s => (s.log || []).forEach(e =>
-      rows2.push([o.season, styleOf(o), s.name, e.text || "", e.byName, timeText(e.t), photosText(e.photos)])));
+      rows2.push([o.season, styleOf(o), s.name, e.process || "", e.workers || "", e.estDone || "", e.text || "", e.byName, timeText(e.t), photosText(e.photos)])));
     [...fields.order, ...fields.production].filter(f => f.type === "log").forEach(f =>
-      (o.logs[f.k] || []).forEach(e => rows2.push([o.season, styleOf(o), f.label, e.text || "", e.byName, timeText(e.t), photosText(e.photos)])));
+      (o.logs[f.k] || []).forEach(e => rows2.push([o.season, styleOf(o), f.label, "", "", "", e.text || "", e.byName, timeText(e.t), photosText(e.photos)])));
   });
 
   // 表三：验货问题（发现问题/整改情况/补充说明 各自独立一行方便查看）

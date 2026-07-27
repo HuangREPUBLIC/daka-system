@@ -32,9 +32,9 @@ async function call(method, path, token, body) {
   // admin can log
   const al = await call("POST", `/orders/${o1.id}/logs`, aT, { key: "cutting", text: "管理员打卡测试" });
   ok(al.status === 200 && al.j.logs.cutting.some(e => e.text === "管理员打卡测试" && e.byName === "老板"), "管理员打卡并自动记名");
-  // sales(陈晓芳 创建 o1) can update order-section progress, but not production
+  // sales(陈晓芳 创建 o1) can update both order-section and production-section progress on 自己的订单
   ok((await call("POST", `/orders/${o1.id}/logs`, sT, { key: "fabricProg", text: "业务员更新面料" })).status === 200, "业务员更新订单明细进度");
-  ok((await call("POST", `/orders/${o1.id}/logs`, sT, { key: "ironing", text: "越权" })).status === 403, "业务员不能在生产明细打卡");
+  ok((await call("POST", `/orders/${o1.id}/logs`, sT, { key: "ironing", text: "业务员也能打卡" })).status === 200, "本单业务员也能在生产明细打卡");
   // sales edit basic ok; follower cannot
   ok((await call("PATCH", `/orders/${o1.id}`, sT, { values: { fabric: "改过的面料" } })).status === 200, "业务员改自己订单基本信息");
   ok((await call("PATCH", `/orders/${o1.id}`, fT, { values: { fabric: "x" } })).status === 403, "下厂员不能改基本信息");

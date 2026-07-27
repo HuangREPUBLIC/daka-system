@@ -12,13 +12,13 @@ let state = {
   factories: { emb: [], prod: [], proc: [] }, orders: [], roles: [], seasons: [],
   chat: { contacts: [], activeId: null, contact: null, messages: [], draft: "", att: null },
   unread: { total: 0, byUser: {} },
-  myLogs: null, feedback: null
+  myLogs: null, feedback: null, myFeedback: null
 };
 let route = { v: "orders", id: null };
 let editingBasic = false, importPreview = null, importRaw = "";
 let showWelcome = false;   // 登录成功后短暂展示的欢迎界面（logo/公司名称/跟单系统）
 const expandedLogGroups = new Set();   // 打卡记录里手动点开"展开全部"的订单(orderId)
-let filt = { season: "", sales: "", follower: "", kw: "" };
+let filt = { season: "", sales: "", follower: "", kw: "", factoryKw: "" };
 let modalState = null;
 let deferredInstall = null;   // 安卓/桌面 Chrome 的原生安装事件
 // 是否已经是「装到主屏后打开」的状态
@@ -42,6 +42,15 @@ function fmtT(t) {
 function todayStr() {
   const d = new Date(), p = n => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+// 导入表格里的日期五花八门(2026/8/15、2026年8月15日…)，统一成 input[type=date] 认得的 yyyy-mm-dd，
+// 不然日期字段的值会在导入预览里显示成空白，确认导入时又被当作"没填"悄悄丢掉
+function normalizeImportDate(s) {
+  s = String(s || "").trim();
+  if (!s || /^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^(\d{4})[\/\-年.](\d{1,2})[\/\-月.](\d{1,2})日?$/);
+  if (m) return `${m[1]}-${String(m[2]).padStart(2, "0")}-${String(m[3]).padStart(2, "0")}`;
+  return s;
 }
 // 日期字符串 2026-08-15 -> 2026年8月15日
 function fmtDate(v) {
@@ -120,13 +129,15 @@ function canAddLog(o, section) {
   const m = me(); if (!m) return false;
   if (m.template === "admin") return true;
   if (o.values.follower === m.id) return true;
-  if (section === "order" && canEditBasic(o)) return true;
+  // 订单明细/生产明细的进度打卡，本单业务员也能写（跟单过程中经常要帮着记录）；
+  // 但这不代表业务员能填验货「整改情况」，那个权限单独判断，见 canWriteInspFix
+  if ((section === "order" || section === "production") && canEditBasic(o)) return true;
   return false;
 }
 const canTouchEntry = e => { const m = me(); return m && (m.template === "admin" || e.by === m.id); };
-// 验货「发现问题」只有业务员/管理员能写；「整改情况」只有本单负责下厂员/管理员能写
+// 验货「发现问题」只有业务员/管理员能写；「整改情况」只有本单负责下厂员/管理员能写(业务员没有这个权利)
 const canWriteInspProblem = () => { const m = me(); return m && (m.template === "admin" || m.template === "sales"); };
-const canWriteInspFix = o => canAddLog(o, "production");
+const canWriteInspFix = o => { const m = me(); return m && (m.template === "admin" || o.values.follower === m.id); };
 
 /* ================= 字段与下拉 ================= */
 function optionsFor(f) {
@@ -141,15 +152,24 @@ function optionsFor(f) {
 function displayVal(o, f) {
   const v = (o.values || {})[f.k];
   if (v == null || v === "") return "";
+  if (Array.isArray(v)) return v.length ? v.join("、") : "";
   if (f.type === "user-sales" || f.type === "user-follower") return uname(v) || v;
   if (f.type === "date") return fmtDate(v);
   return v;
 }
+const isMultiFactory = f => f.type === "factory-fabric" || f.type === "factory-emb";
 function fieldInput(f, val, prefix) {
   prefix = prefix || "nf-";
-  const id = prefix + f.k, opts = optionsFor(f);
-  if (opts) return `<select class="in" id="${id}"><option value="">请选择</option>${opts.map(([v, t]) =>
-    `<option value="${esc(v)}" ${v === val ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>`;
+  const id = prefix + f.k;
+  if (isMultiFactory(f)) return factoryMultiHtml(f, val, id);
+  const opts = optionsFor(f);
+  if (opts) {
+    // 工厂类下拉：就算这个值不在管理员定义的列表里(比如导入进来的)，也要保留显示出来，不能悄悄丢掉
+    const isFactory = f.type === "factory-prod";
+    const extra = (isFactory && val && !opts.some(([v]) => v === val)) ? [[val, val]] : [];
+    return `<select class="in" id="${id}"><option value="">请选择</option>${[...extra, ...opts].map(([v, t]) =>
+      `<option value="${esc(v)}" ${v === val ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>`;
+  }
   if (f.type === "textarea") return `<textarea class="in" id="${id}">${esc(val || "")}</textarea>`;
   if (f.type === "date") return dateFieldHtml(id, val);
   if (f.type === "number") return `<input class="in" type="number" id="${id}" value="${esc(val || "")}">`;
@@ -157,6 +177,23 @@ function fieldInput(f, val, prefix) {
   return `<input class="in" id="${id}" value="${esc(val || "")}">`;
 }
 const fieldRow = (f, val, prefix) => `<label class="field"><span>${esc(f.label)}</span>${fieldInput(f, val, prefix)}</label>`;
+
+// 面料工厂/绣印工厂：同一款可能要挂多个供应商，用标签+下拉添加，而不是单选
+function factoryMultiHtml(f, val, id) {
+  const opts = optionsFor(f) || [];
+  // 值不在管理员定义的列表里(比如老数据、导入进来的)也保留，不悄悄丢掉
+  const arr = Array.isArray(val) ? val.slice() : (val ? [val] : []);
+  const remaining = opts.filter(([v]) => !arr.includes(v));
+  return `<div class="multifactory" data-id="${id}">
+    <div class="multifactory-chips">${arr.length ? arr.map(v => `<span class="tag role">${esc(v)}
+      <a href="javascript:void(0)" onclick="A.removeFactoryChip('${id}','${encodeURIComponent(v)}')" style="margin-left:4px">✕</a></span>`).join("")
+      : `<span class="row-sub">未选择</span>`}</div>
+    ${remaining.length ? `<div style="display:flex;gap:8px;margin-top:8px">
+      <select class="in" id="${id}--add"><option value="">选择要添加的工厂</option>${remaining.map(([v, t]) =>
+        `<option value="${esc(v)}">${esc(t)}</option>`).join("")}</select>
+      <button type="button" class="btn mini ghost" onclick="A.addFactoryChip('${id}')">添加</button></div>` : ""}
+    <input type="hidden" id="${id}" value='${esc(JSON.stringify(arr))}'></div>`;
+}
 
 // 日期：真正的 input[type=date] 透明地盖满整个按钮区域直接接收点击/触摸(不靠 JS 模拟点击，
 // 部分手机浏览器不支持 showPicker() 会导致点了没反应)，下面露出显示「2026年8月15日」的中文按钮
@@ -297,17 +334,17 @@ function renderLightbox() {
   let el = document.getElementById("lightbox");
   if (!lightbox) { if (el) el.remove(); return; }
   if (!el) { el = document.createElement("div"); el.id = "lightbox"; el.className = "lightbox"; document.body.appendChild(el); }
-  const { photos, i } = lightbox;
+  const { photos, i, gestures } = lightbox;
   el.innerHTML = `<div class="lb-bar"><span class="lb-count num">${i + 1} / ${photos.length}</span>
       <button class="lb-close" onclick="A.closeLightbox()">✕</button></div>
     <img class="lb-img" src="${esc(photos[i])}" alt="照片">
     ${photos.length > 1 ? `<button class="lb-nav prev" onclick="event.stopPropagation();A.lbStep(-1)">‹</button>
       <button class="lb-nav next" onclick="event.stopPropagation();A.lbStep(1)">›</button>` : ""}
-    <div class="lb-hint">双指放大 · 双击还原</div>`;
+    ${gestures !== false ? `<div class="lb-hint">双指放大 · 双击还原</div>` : ""}`;
   // 只有点黑色背景才关闭；点图片是为了缩放，不关
   el.onclick = (e) => { if (e.target === el) A.closeLightbox(); };
   const img = el.querySelector(".lb-img");
-  if (img) attachLightboxGestures(img);
+  if (img && gestures !== false) attachLightboxGestures(img);
 }
 
 /* ================= 路由 ================= */
@@ -316,7 +353,7 @@ function go(v, id) {
   photoDraft = {}; lightbox = null;
   if (v !== "chat") { state.chat.activeId = null; state.chat.messages = []; state.chat.draft = ""; state.chat.att = null; }
   render(); window.scrollTo(0, 0);
-  if (v === "account") A.loadMyLogs(state.me.id);
+  if (v === "account") { A.loadMyLogs(state.me.id); A.loadMyFeedback(); }
   if (v === "staffLogs" && id) A.loadMyLogs(id);
   if (v === "admin") A.loadFeedback();
   if (v === "chat") { A.loadContacts(); A.refreshUnread(); }
@@ -371,6 +408,7 @@ function render() {
   const views = { orders: vOrders, new: vNew, detail: vDetail, chat: vChat,
     admin: vAdmin, account: vAccount, staffLogs: vStaffLogs };
   app.innerHTML = `
+    ${route.v === "orders" ? `<div class="home-brand"><div class="co">${esc(COMPANY_NAME)}</div><div class="app">${esc(APP_NAME)}</div></div>` : ""}
     <header class="navbar"><div class="navbar-in">
       <div class="nav-slot">${meta.left || ""}</div>
       <h1 class="nav-title">${esc(meta.title)}</h1>
@@ -422,24 +460,27 @@ function latestLog(o) {
   return best;
 }
 function vOrders() {
+  const factoryOf = o => [o.values.factory, o.values.fabricFactory, o.values.embFactory]
+    .flat().filter(Boolean).join(" ").toLowerCase();
   const list = state.orders.filter(o =>
     (!filt.season || o.season === filt.season) &&
     (!filt.sales || o.values.sales === filt.sales) &&
     (!filt.follower || o.values.follower === filt.follower) &&
-    (!filt.kw || [o.values.styleNo, o.values.styleName, o.values.style, o.values.factory, o.values.fabricFactory, o.values.embFactory]
-      .join(" ").toLowerCase().includes(filt.kw.toLowerCase()))
+    (!filt.kw || [o.values.styleNo, o.values.styleName, o.values.style]
+      .join(" ").toLowerCase().includes(filt.kw.toLowerCase())) &&
+    (!filt.factoryKw || factoryOf(o).includes(filt.factoryKw.toLowerCase()))
   ).slice().sort((a, b) => b.createdAt - a.createdAt);
   const opt = (arr, cur) => arr.map(([v, t]) =>
     `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(t)}</option>`).join("");
+  const allFactories = [...new Set([...state.factories.prod, ...state.factories.fabric, ...state.factories.emb])];
   return `<section class="group">
-    <div class="home-brand"><div class="co">${esc(COMPANY_NAME)}</div><div class="app">${esc(APP_NAME)}</div></div>
-  </section>
-  <section class="group">
     <div class="card"><div class="filters">
       <select class="in" onchange="A.setF('season',this.value)"><option value="">全部季节</option>${opt(seasonOptions("").map(s => [s, s]), filt.season)}</select>
       <select class="in" onchange="A.setF('sales',this.value)"><option value="">全部业务员</option>${opt(state.users.filter(u => u.template === "sales").map(u => [u.id, u.name]), filt.sales)}</select>
       <select class="in" onchange="A.setF('follower',this.value)"><option value="">全部下厂员</option>${opt(state.users.filter(u => u.template === "follower").map(u => [u.id, u.name]), filt.follower)}</select>
-      <input class="in" placeholder="搜货号 / 款式名 / 工厂" value="${esc(filt.kw)}" oninput="A.setFKw(this.value)">
+      <input class="in" id="flt-kw" placeholder="搜货号 / 款式名" value="${esc(filt.kw)}" oninput="A.setFKw(this.value)">
+      <input class="in" id="flt-factory" list="factory-datalist" placeholder="搜工厂（可自动补全）" value="${esc(filt.factoryKw)}" oninput="A.setFFactoryKw(this.value)">
+      <datalist id="factory-datalist">${allFactories.map(x => `<option value="${esc(x)}">`).join("")}</datalist>
     </div></div></section>
   <section class="group">
     <div class="group-title">订单列表 · 共 ${list.length} 单</div>
@@ -448,7 +489,7 @@ function vOrders() {
       return `<div class="ocard" onclick="go('detail','${o.id}')" role="button" tabindex="0" onkeydown="if(event.key==='Enter')go('detail','${o.id}')">
         <div class="thumb">${(function(){const c=normalizePhotos(o.values.img)[0];return c?`<img src="${esc(c)}" alt="款式图">`:"款式图";})()}</div>
         <div class="o-main">
-          <div class="o-title"><span class="tag">${esc(o.season)}</span>${esc(o.values.styleNo || "")} ${esc(o.values.styleName || "")}</div>
+          <div class="o-title"><span class="tag season">${esc(o.season)}</span>${esc(o.values.styleNo || "")} ${esc([o.values.styleName, o.values.style].filter(Boolean).join(" "))}</div>
           <div class="o-meta"><span>业务员 ${esc(uname(o.values.sales)) || "—"}</span><span>下厂员 ${esc(uname(o.values.follower)) || "未指定"}</span>
             <span class="num">数量 ${esc(o.values.qty || "-")}</span><span>交期 ${esc(fmtDate(o.values.deadline)) || "-"}</span></div>
           ${latest ? `<div class="o-latest">最新：${esc(latest.fieldLabel)} · ${esc(latest.text)} <span class="num">(${fmtT(latest.t)})</span></div>` : ""}
@@ -512,11 +553,24 @@ function importPreviewHtml() {
 function logEntriesHtml(list, oid, key) {
   const entries = (list || []).slice().sort((a, b) => b.t - a.t);
   if (!entries.length) return `<div class="empty" style="padding:8px 0">暂无打卡记录</div>`;
+  const isMainSub = key === "mainLog" || key.startsWith("sub:");
   return `<ul class="log">${entries.map(e => `<li>
     <div class="meta"><b>${esc(e.byName)}</b><span class="num">${fmtT(e.t)}</span>
       ${canTouchEntry(e) ? `<span class="act-row"><button type="button" class="act-btn" onclick="A.editLog('${oid}','${key}','${e.id}')">改</button>
       <button type="button" class="act-btn danger" onclick="A.delLog('${oid}','${key}','${e.id}')">删</button></span>` : ""}</div>
+    ${isMainSub && e.process ? `<div style="font-size:13px;color:var(--ink-2);margin-top:2px">
+      生产工序：${esc(e.process)} · 车工人数：${esc(e.workers)} · 预计下车：${esc(fmtDate(e.estDone))}</div>` : ""}
     ${e.text ? `<div class="txt">${esc(e.text)}</div>` : ""}${photoGallery(e.photos)}</li>`).join("")}</ul>`;
+}
+// 主厂/加工点打卡：生产工序/车工人数/预计下车时间是必填项（其它进度字段仍是纯文字打卡）
+function mainSubAddBoxHtml(oid, key, placeholder) {
+  return `<div class="addbox" id="add-${key}">
+    <label class="field"><span>生产工序</span><input class="in" id="proc-${key}" placeholder="例：车缝、锁边"></label>
+    <label class="field"><span>车工人数</span><input class="in" type="number" id="workers-${key}" placeholder="例：12"></label>
+    <label class="field"><span>预计下车时间</span>${dateFieldHtml("est-" + key, "")}</label>
+    <textarea class="in" id="txt-${key}" placeholder="${esc(placeholder)}" style="margin-top:8px"></textarea>
+    ${photoPicker("log:" + key)}
+    <div style="margin-top:8px"><button class="btn mini" onclick="A.addLog('${oid}','${key}')">提交打卡</button></div></div>`;
 }
 function logFieldHtml(o, f, list, addKey, canAdd) {
   return `<div class="logfield">
@@ -538,9 +592,7 @@ function subCardHtml(o, s, canProdLog) {
       ${isAdmin() ? `<button type="button" class="act-btn danger" onclick="A.delSub('${o.id}','${s.id}')">删除</button>` : ""}
       ${canProdLog ? `<button class="btn mini right" onclick="A.toggleAdd('${key}')">＋ 打卡</button>` : ""}
     </div>
-    ${canProdLog ? `<div class="addbox" id="add-${key}"><textarea class="in" id="txt-${key}" placeholder="该加工点的进度情况…"></textarea>
-      ${photoPicker("log:" + key)}
-      <div style="margin-top:8px"><button class="btn mini" onclick="A.addLog('${o.id}','${key}')">提交打卡</button></div></div>` : ""}
+    ${canProdLog ? mainSubAddBoxHtml(o.id, key, "该加工点的进度情况（补充说明，选填）…") : ""}
     ${logEntriesHtml(s.log, o.id, key)}</div>`;
 }
 // 验货：一条"发现问题/整改情况"的展示（两个字段各自独立可编辑）
@@ -582,10 +634,10 @@ function vDetail() {
 
   return `<section class="group">
     <div class="card"><div class="card-pad" style="display:flex;align-items:center;gap:14px">
+      <span class="tag season" style="flex:none;font-size:14px;padding:5px 12px">${esc(o.season)}</span>
       <div style="flex:1;min-width:0">
         <div style="font-size:20px;font-weight:700;letter-spacing:-.02em">${esc(o.values.styleNo || "")}</div>
         <div style="color:var(--ink-2);margin-top:2px">${esc([o.values.styleName, o.values.style].filter(Boolean).join(" "))}</div>
-        <div style="margin-top:8px"><span class="tag">${esc(o.season)}</span></div>
       </div>
       ${headerThumb}
     </div></div></section>
@@ -611,9 +663,7 @@ function vDetail() {
           <div class="lf-head" style="font-size:14.5px"><span>主厂</span>
             <span class="tag role">${esc(o.values.factory) || "未指定"}</span>
             ${canProdLog ? `<button class="btn mini right" onclick="A.toggleAdd('mainLog')">＋ 打卡</button>` : ""}</div>
-          ${canProdLog ? `<div class="addbox" id="add-mainLog"><textarea class="in" id="txt-mainLog" placeholder="主厂生产进度…"></textarea>
-            ${photoPicker("log:mainLog")}
-            <div style="margin-top:8px"><button class="btn mini" onclick="A.addLog('${o.id}','mainLog')">提交打卡</button></div></div>` : ""}
+          ${canProdLog ? mainSubAddBoxHtml(o.id, "mainLog", "主厂生产进度（补充说明，选填）…") : ""}
           ${logEntriesHtml(o.mainLog, o.id, "mainLog")}</div>
         ${(o.subs || []).map(s => subCardHtml(o, s, canProdLog)).join("")}
         ${canProdLog ? `<div style="margin-top:10px;border-top:.5px solid var(--line);padding-top:10px">
@@ -700,7 +750,9 @@ function contactsHtml() {
 }
 function attachmentHtml(a, mine) {
   if (!a) return "";
-  if (a.isImage) return `<a href="${esc(a.url)}" target="_blank" rel="noopener"><img class="b-img" src="${esc(a.url)}" alt="${esc(a.name)}"></a>`;
+  // 跟订单里的照片用同一个大图查看器，但聊天图片不需要双指缩放/双击还原那套手势
+  if (a.isImage) return `<img class="b-img" src="${esc(a.url)}" alt="${esc(a.name)}"
+    data-gallery='${JSON.stringify([a.url])}' data-i="0" data-gestures="0" onclick="A.lightboxFromEl(this)">`;
   return `<a class="b-file" href="${esc(a.url)}" target="_blank" rel="noopener" download="${esc(a.name)}"
     style="${mine ? "color:#fff" : ""}"><span class="fi">📄</span>
     <span><span class="fn">${esc(a.name)}</span><br><span class="fs num">${fmtSize(a.size)}</span></span></a>`;
@@ -850,7 +902,10 @@ function vAdmin() {
     <div class="group-title">意见反馈${state.feedback ? ` · 共 ${state.feedback.length} 条` : ""}</div>
     <div class="card">${state.feedback && state.feedback.length
       ? `<ul class="log" style="padding:4px 16px">${state.feedback.map(f => `<li>
-          <div class="meta"><b>${esc(f.byName)}</b><span class="num">${fmtT(f.createdAt)}</span></div>
+          <div class="meta"><b>${esc(f.byName)}</b><span class="num">${fmtT(f.createdAt)}</span>
+            ${f.handled ? `<span class="tag ok">已处理</span>` : ""}
+            <button type="button" class="act-btn${f.handled ? " ghost" : ""} right" onclick="A.toggleFeedbackHandled('${f.id}',${!f.handled})">
+              ${f.handled ? "标记未处理" : "标记已处理"}</button></div>
           <div class="txt">${esc(f.text)}</div></li>`).join("")}</ul>`
       : `<div class="empty">${state.feedback ? "还没有反馈" : "加载中…"}</div>`}</div>
   </section>`;
@@ -884,7 +939,11 @@ function vAccount() {
     <div class="group-title">意见反馈</div>
     <div class="card"><div class="card-pad">
       <p style="font-size:13.5px;color:var(--ink-2);margin:0 0 12px">对系统有什么建议或发现什么问题，都可以写在这里，管理员会看到</p>
-      <button class="btn ghost" onclick="A.submitFeedback()">提交反馈</button></div></div>
+      <button class="btn ghost" onclick="A.submitFeedback()">提交反馈</button></div>
+      ${state.myFeedback && state.myFeedback.length ? `<ul class="log" style="padding:4px 16px 12px">${state.myFeedback.map(f => `<li>
+        <div class="meta"><span class="num">${fmtT(f.createdAt)}</span>
+          ${f.handled ? `<span class="tag ok">已处理</span>` : `<span class="tag role">待处理</span>`}</div>
+        <div class="txt">${esc(f.text)}</div></li>`).join("")}</ul>` : ""}</div>
   </section>
 
   <section class="group">
@@ -923,8 +982,11 @@ const A = {
     if (photoDraft[ctx]) { photoDraft[ctx].splice(i, 1); const el = $("pe-" + ctx); if (el) el.innerHTML = pickerInner(ctx); }
   },
   lightboxFromEl(el) {
-    try { lightbox = { photos: JSON.parse(el.getAttribute("data-gallery")), i: +el.getAttribute("data-i") || 0 }; renderLightbox(); }
-    catch (e) {}
+    try {
+      const gestures = el.getAttribute("data-gestures") !== "0";
+      lightbox = { photos: JSON.parse(el.getAttribute("data-gallery")), i: +el.getAttribute("data-i") || 0, gestures };
+      renderLightbox();
+    } catch (e) {}
   },
   lbStep(d) {
     if (!lightbox) return;
@@ -1020,7 +1082,15 @@ const A = {
     filt.kw = v; clearTimeout(A._kwT);
     A._kwT = setTimeout(() => {
       render();
-      const inp = document.querySelector(".filters input");
+      const inp = $("flt-kw");
+      if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+    }, 300);
+  },
+  setFFactoryKw(v) {
+    filt.factoryKw = v; clearTimeout(A._factoryKwT);
+    A._factoryKwT = setTimeout(() => {
+      render();
+      const inp = $("flt-factory");
       if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
     }, 300);
   },
@@ -1028,8 +1098,28 @@ const A = {
   collectScalars(section, into) {
     for (const f of state.fields[section].filter(f => f.type !== "log")) {
       if (f.type === "image") { into[f.k] = photoDraft.img || []; continue; }
-      const el = $("nf-" + f.k); if (el) into[f.k] = el.value.trim();
+      const el = $("nf-" + f.k); if (!el) continue;
+      if (isMultiFactory(f)) { try { into[f.k] = JSON.parse(el.value || "[]"); } catch (e) { into[f.k] = []; } continue; }
+      into[f.k] = el.value.trim();
     }
+  },
+  addFactoryChip(id) {
+    const sel = $(id + "--add"); if (!sel || !sel.value) return;
+    const hidden = $(id); let arr = []; try { arr = JSON.parse(hidden.value || "[]"); } catch (e) { }
+    if (!arr.includes(sel.value)) arr.push(sel.value);
+    A.rerenderFactoryField(id, arr);
+  },
+  removeFactoryChip(id, encVal) {
+    const hidden = $(id); let arr = []; try { arr = JSON.parse(hidden.value || "[]"); } catch (e) { }
+    arr = arr.filter(v => v !== decodeURIComponent(encVal));
+    A.rerenderFactoryField(id, arr);
+  },
+  rerenderFactoryField(id, arr) {
+    const container = document.querySelector(`.multifactory[data-id="${CSS.escape(id)}"]`); if (!container) return;
+    const fKey = id.replace(/^(nf-|imp\d+-)/, "");
+    const f = [...state.fields.order, ...state.fields.production].find(x => x.k === fKey);
+    if (!f) return;
+    container.outerHTML = factoryMultiHtml(f, arr, id);
   },
   async createOrder() {
     const season = ($("nf-season").value || "").trim();
@@ -1059,8 +1149,15 @@ const A = {
   async addLog(oid, key) {
     const el = $("txt-" + key), text = ((el && el.value) || "").trim();
     const photos = photoDraft["log:" + key] || [];
-    if (!text && !photos.length) return toast("请填写打卡内容或加照片");
-    await run(() => api("POST", `/orders/${oid}/logs`, { key, text, photos }).then(() => { delete photoDraft["log:" + key]; }), "打卡成功");
+    const isMainSub = key === "mainLog" || key.startsWith("sub:");
+    const body = { key, text, photos };
+    if (isMainSub) {
+      const process = ($("proc-" + key) || {}).value || "", workers = ($("workers-" + key) || {}).value || "";
+      const estDone = ($("est-" + key) || {}).value || "";
+      if (!process.trim() || !workers.trim() || !estDone) return toast("请填写生产工序、车工人数、预计下车时间");
+      Object.assign(body, { process: process.trim(), workers: workers.trim(), estDone });
+    } else if (!text && !photos.length) return toast("请填写打卡内容或加照片");
+    await run(() => api("POST", `/orders/${oid}/logs`, body).then(() => { delete photoDraft["log:" + key]; }), "打卡成功");
   },
   editLog(oid, key, eid) {
     const o = state.orders.find(x => x.id === oid);
@@ -1210,13 +1307,22 @@ const A = {
   },
   submitFeedback() {
     modal({ title: "意见反馈", input: "textarea", okText: "提交",
-      onOk: v => { if (v && v.trim()) run(() => api("POST", "/feedback", { text: v.trim() }), "感谢反馈，已提交给管理员"); } });
+      onOk: v => { if (v && v.trim()) run(() => api("POST", "/feedback", { text: v.trim() }).then(() => A.loadMyFeedback()), "感谢反馈，已提交给管理员"); } });
   },
   async loadFeedback() {
     if (!isAdmin()) return;
     state.feedback = null;
     try { state.feedback = await api("GET", "/feedback"); }
     catch (e) { state.feedback = []; }
+    render();
+  },
+  async toggleFeedbackHandled(id, handled) {
+    await run(() => api("PATCH", `/feedback/${id}`, { handled }).then(() => A.loadFeedback()),
+      handled ? "已标记为已处理" : "已标记为未处理");
+  },
+  async loadMyFeedback() {
+    try { state.myFeedback = await api("GET", "/feedback/mine"); }
+    catch (e) { state.myFeedback = []; }
     render();
   },
   viewStaffLogs(id) { go("staffLogs", id); },
@@ -1353,7 +1459,12 @@ const A = {
         else if (key === "sales" || key === "follower") {
           const u = state.users.find(x => x.name === v);
           if (u) values[key] = u.id;
-        } else values[key] = v;
+        } else {
+          const f = [...state.fields.order, ...state.fields.production].find(x => x.k === key);
+          if (f && f.type === "date") values[key] = normalizeImportDate(v);
+          else if (f && isMultiFactory(f)) values[key] = v.split(/[,，、\/]/).map(s => s.trim()).filter(Boolean);
+          else values[key] = v;
+        }
       });
       if (!values.styleNo && !values.styleName) continue;
       if (me().template === "sales" && !values.sales) values.sales = me().id;
@@ -1393,8 +1504,13 @@ const A = {
     importPreview.forEach((r, i) => {
       const se = $("imp" + i + "-season"); if (se) r.season = se.value || "";
       scal.forEach(f => {
-        const el = $("imp" + i + "-" + f.k);
-        if (el) { const v = (el.value || "").trim(); if (v) r.values[f.k] = v; else delete r.values[f.k]; }
+        const el = $("imp" + i + "-" + f.k); if (!el) return;
+        if (isMultiFactory(f)) {
+          let arr = []; try { arr = JSON.parse(el.value || "[]"); } catch (e) { }
+          if (arr.length) r.values[f.k] = arr; else delete r.values[f.k];
+          return;
+        }
+        const v = (el.value || "").trim(); if (v) r.values[f.k] = v; else delete r.values[f.k];
       });
     });
   },
@@ -1417,6 +1533,46 @@ const A = {
     } catch (e) { toast((e && e.error) || "导入失败"); }
   }
 };
+
+/* ================= 下拉刷新 ================= */
+// 在页面顶部往下拉可以强制刷新一次数据，不用退出重进；聊天单聊里、大图查看器打开时、
+// 弹窗打开时不生效，避免跟那些地方自己的手势/滚动冲突
+(function setupPullRefresh() {
+  const THRESHOLD = 62;
+  let startY = null, dragging = false, refreshing = false;
+  const canPull = () => !refreshing && me() && !modalState && !lightbox
+    && !(route.v === "chat" && state.chat.activeId) && window.scrollY === 0;
+  document.addEventListener("touchstart", (e) => {
+    if (!canPull()) { startY = null; return; }
+    startY = e.touches[0].clientY;
+  }, { passive: true });
+  document.addEventListener("touchmove", (e) => {
+    if (startY == null) return;
+    const dy = e.touches[0].clientY - startY;
+    if (dy <= 0 || window.scrollY > 0) return;
+    dragging = true;
+    const ind = $("pull-refresh"); if (!ind) return;
+    const dist = Math.min(dy * 0.5, 90);
+    ind.classList.add("dragging");
+    ind.style.transform = `translateY(${dist}px)`;
+    ind.textContent = dist >= THRESHOLD ? "松开刷新" : "↓ 下拉刷新";
+  }, { passive: true });
+  document.addEventListener("touchend", async () => {
+    if (!dragging) { startY = null; return; }
+    dragging = false;
+    const ind = $("pull-refresh"); if (!ind) { startY = null; return; }
+    const dist = parseFloat((ind.style.transform.match(/-?[\d.]+/) || [0])[0]) || 0;
+    ind.classList.remove("dragging");
+    if (dist >= THRESHOLD) {
+      refreshing = true;
+      ind.style.transform = "translateY(50px)"; ind.textContent = "刷新中…";
+      try { await refresh(); render(); } catch (e) { }
+      refreshing = false;
+    }
+    ind.style.transform = "translateY(-40px)";
+    startY = null;
+  });
+})();
 
 /* ================= 启动 ================= */
 window.go = go; window.A = A;

@@ -85,12 +85,13 @@ function canEditBasic(u, order) {
   if (u.role === "admin") return true;
   return templateOf(u) === "sales" && (order.created_by === u.id || (order.data.values || {}).sales === u.id);
 }
-// 能否在某板块打卡：管理员；本单负责下厂员；订单明细板块业务员本人也可更新进度
+// 能否在某板块打卡：管理员；本单负责下厂员；订单明细/生产明细板块业务员本人也可更新进度
+// （业务员能打卡不代表能填验货整改情况，那个权限单独判断，见 canWriteInspFix）
 function canAddLog(u, order, section) {
   if (!u) return false;
   if (u.role === "admin") return true;
   if ((order.data.values || {}).follower === u.id) return true;
-  if (section === "order" && canEditBasic(u, order)) return true;
+  if ((section === "order" || section === "production") && canEditBasic(u, order)) return true;
   return false;
 }
 // 能否修改/删除某条记录：管理员或本人
@@ -99,8 +100,9 @@ const canTouchEntry = (u, entry) => u && (u.role === "admin" || entry.by === u.i
 // 验货「发现问题」：只有业务员（或管理员）能写，不要求是本单的业务员——
 // 质检可能是任何业务员做的，跟下厂员打卡限定在"自己负责的订单"不是一回事。
 const canWriteInspProblem = (u) => u && (u.role === "admin" || templateOf(u) === "sales");
-// 验货「整改情况」：只有本单负责下厂员（或管理员）能写，跟生产明细打卡权限一致。
-const canWriteInspFix = (u, order) => canAddLog(u, order, "production");
+// 验货「整改情况」：只有本单负责下厂员（或管理员）能写——业务员没有这个权利，
+// 不能跟着 canAddLog(production) 放开(那个现在也允许本单业务员打卡进度)，这里要单独判断。
+const canWriteInspFix = (u, order) => u && (u.role === "admin" || (order.data.values || {}).follower === u.id);
 
 module.exports = {
   hashPassword, verifyPassword, signToken, userPublic, userById,

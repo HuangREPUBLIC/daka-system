@@ -59,9 +59,13 @@ async function apiAs(phone, method, p, body) {
   const opts = [...filterSel.options].map(o => o.value);
   ok(opts.includes("SS" + (y + 1)) && opts.includes("FW" + (y + 1)), "季节筛选含未来季节(不再锁死在已有订单)");
 
-  // ---- 搜索框支持按服装厂(生产厂)搜索 ----
+  // ---- 独立的工厂搜索框(带自动补全)，货号/款式名搜索框不再混着搜工厂 ----
+  ok(!!doc.getElementById("factory-datalist"), "工厂搜索框带自动补全下拉列表");
+  A.setFFactoryKw("宏发"); await sleep(400);
+  ok(app().includes("SS27-T012") && !app().includes("裙"), "按工厂关键字搜到对应订单，其它订单被过滤掉");
+  A.setFFactoryKw(""); await sleep(400);
   A.setFKw("宏发"); await sleep(400);
-  ok(app().includes("SS27-T012") && !app().includes("裙"), "按生产厂关键字搜到对应订单，其它订单被过滤掉");
+  ok(!app().includes("SS27-T012"), "货号/款式名搜索框不再匹配工厂名");
   A.setFKw(""); await sleep(400);
 
   // ---- 我的账号：职位 + 打卡记录 + 意见反馈 ----
@@ -109,6 +113,10 @@ async function apiAs(phone, method, p, body) {
   await sleep(300);
   ok(app().includes("意见反馈") && app().includes("UI测试-建议增加导出定时任务") && app().includes("王建国"),
     "管理员能在后台看到刚提交的意见反馈，带提交人姓名");
+  ok(app().includes("标记已处理"), "反馈列表带「标记已处理」按钮");
+  const fbId = st().feedback.find(f => f.text === "UI测试-建议增加导出定时任务").id;
+  await A.toggleFeedbackHandled(fbId, true); await sleep(400);
+  ok(app().includes("已处理") && app().includes("标记未处理"), "标记已处理后显示「已处理」，按钮变成「标记未处理」");
 
   // ---- 打卡记录按订单分组显示（王建国在两个不同订单上都有打卡） ----
   const wang = st().users.find(u => u.name === "王建国");
@@ -146,6 +154,16 @@ async function apiAs(phone, method, p, body) {
   const sent = st().chat.messages;
   ok(sent.length === before + 1 && sent[sent.length - 1].fromMe === true
     && sent[sent.length - 1].text === "晓芳，这单交期要提前", "消息标记为自己发出");
+
+  // 聊天图片改用跟订单照片一样的大图查看器，但不带双指缩放/双击还原那套手势
+  const chatImgHtml = window.eval(`attachmentHtml({isImage:true,url:"/uploads/x.jpg",name:"x.jpg"}, false)`);
+  ok(chatImgHtml.includes('onclick="A.lightboxFromEl(this)"') && chatImgHtml.includes('data-gestures="0"')
+    && !chatImgHtml.includes("target=\"_blank\""), "聊天图片点开用大图查看器，不是新开标签页");
+  window.eval(`A.lightboxFromEl({getAttribute:(n)=>({"data-gallery":'["/uploads/x.jpg"]',"data-i":"0","data-gestures":"0"}[n])})`);
+  await sleep(100);
+  const lb = doc.getElementById("lightbox");
+  ok(!!lb && !lb.innerHTML.includes("双指放大"), "聊天图片的大图查看器不显示双指缩放提示");
+  A.closeLightbox(); await sleep(100);
 
   // 对方回复后，会话轮询能收到
   await apiAs("13811112222", "POST", "/chat/with/" + st().me.id, { text: "收到，我马上联系工厂" });
@@ -252,7 +270,16 @@ async function apiAs(phone, method, p, body) {
   await A.modalOk(); await sleep(500);
   ok(app().includes("UI测试-已整改"), "下厂员通过界面填写的整改情况显示出来");
 
+  // 王建国自己提交一条反馈，管理员标记已处理后，王建国在「我的」页应该能看到已处理
+  A.submitFeedback(); await sleep(100);
+  doc.getElementById("m-input").value = "UI测试-王建国自己的反馈";
+  await A.modalOk(); await sleep(400);
+  const wangFbId = (await apiAs("13800000000", "GET", "/feedback")).j.find(f => f.text === "UI测试-王建国自己的反馈").id;
+  await apiAs("13800000000", "PATCH", `/feedback/${wangFbId}`, { handled: true });
+
   window.go("account"); await sleep(600);
+  ok(app().includes("UI测试-王建国自己的反馈") && app().includes("已处理"),
+    "提交人在「我的」页能看到自己提交的反馈已被管理员标记处理");
   ok(!app().includes("不点退出的话"), "已移除登录状态说明文字");
   ok(!app().includes("服装生产进度") && !app().includes("一对一私聊")
      && !app().includes("职位可直接下拉修改") && !app().includes("员工离职请用")
