@@ -164,7 +164,8 @@ function dateFieldHtml(id, val) {
   return `<div class="datefield">
     <button type="button" class="in date-btn ${val ? "" : "empty"}" id="${id}--label" tabindex="-1"
       >${val ? esc(fmtDate(val)) : "选择日期"}</button>
-    <input type="date" id="${id}" class="date-native" value="${esc(val || "")}" onchange="A.syncDateLabel('${id}')"></div>`;
+    <input type="date" id="${id}" class="date-native" value="${esc(val || "")}"
+      onchange="A.syncDateLabel('${id}')" onfocus="if(this.showPicker){try{this.showPicker()}catch(e){}}"></div>`;
 }
 // 文件选择：隐藏原生控件（它显示英文 Choose File），用中文按钮代替
 function fileFieldHtml(id, accept, onchange, pickText) {
