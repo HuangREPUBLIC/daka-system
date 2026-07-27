@@ -334,17 +334,16 @@ function renderLightbox() {
   let el = document.getElementById("lightbox");
   if (!lightbox) { if (el) el.remove(); return; }
   if (!el) { el = document.createElement("div"); el.id = "lightbox"; el.className = "lightbox"; document.body.appendChild(el); }
-  const { photos, i, gestures } = lightbox;
+  const { photos, i } = lightbox;
   el.innerHTML = `<div class="lb-bar"><span class="lb-count num">${i + 1} / ${photos.length}</span>
       <button class="lb-close" onclick="A.closeLightbox()">✕</button></div>
     <img class="lb-img" src="${esc(photos[i])}" alt="照片">
     ${photos.length > 1 ? `<button class="lb-nav prev" onclick="event.stopPropagation();A.lbStep(-1)">‹</button>
-      <button class="lb-nav next" onclick="event.stopPropagation();A.lbStep(1)">›</button>` : ""}
-    ${gestures !== false ? `<div class="lb-hint">双指放大 · 双击还原</div>` : ""}`;
+      <button class="lb-nav next" onclick="event.stopPropagation();A.lbStep(1)">›</button>` : ""}`;
   // 只有点黑色背景才关闭；点图片是为了缩放，不关
   el.onclick = (e) => { if (e.target === el) A.closeLightbox(); };
   const img = el.querySelector(".lb-img");
-  if (img && gestures !== false) attachLightboxGestures(img);
+  if (img) attachLightboxGestures(img);
 }
 
 /* ================= 路由 ================= */
@@ -460,15 +459,14 @@ function latestLog(o) {
   return best;
 }
 function vOrders() {
-  const factoryOf = o => [o.values.factory, o.values.fabricFactory, o.values.embFactory]
-    .flat().filter(Boolean).join(" ").toLowerCase();
+  const factoriesOf = o => [o.values.factory, o.values.fabricFactory, o.values.embFactory].flat().filter(Boolean);
   const list = state.orders.filter(o =>
     (!filt.season || o.season === filt.season) &&
     (!filt.sales || o.values.sales === filt.sales) &&
     (!filt.follower || o.values.follower === filt.follower) &&
     (!filt.kw || [o.values.styleNo, o.values.styleName, o.values.style]
       .join(" ").toLowerCase().includes(filt.kw.toLowerCase())) &&
-    (!filt.factoryKw || factoryOf(o).includes(filt.factoryKw.toLowerCase()))
+    (!filt.factoryKw || factoriesOf(o).includes(filt.factoryKw))
   ).slice().sort((a, b) => b.createdAt - a.createdAt);
   const opt = (arr, cur) => arr.map(([v, t]) =>
     `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(t)}</option>`).join("");
@@ -479,8 +477,7 @@ function vOrders() {
       <select class="in" onchange="A.setF('sales',this.value)"><option value="">全部业务员</option>${opt(state.users.filter(u => u.template === "sales").map(u => [u.id, u.name]), filt.sales)}</select>
       <select class="in" onchange="A.setF('follower',this.value)"><option value="">全部下厂员</option>${opt(state.users.filter(u => u.template === "follower").map(u => [u.id, u.name]), filt.follower)}</select>
       <input class="in" id="flt-kw" placeholder="搜货号 / 款式名" value="${esc(filt.kw)}" oninput="A.setFKw(this.value)">
-      <input class="in" id="flt-factory" list="factory-datalist" placeholder="搜工厂（可自动补全）" value="${esc(filt.factoryKw)}" oninput="A.setFFactoryKw(this.value)">
-      <datalist id="factory-datalist">${allFactories.map(x => `<option value="${esc(x)}">`).join("")}</datalist>
+      <select class="in" onchange="A.setF('factoryKw',this.value)"><option value="">全部工厂</option>${opt(allFactories.map(x => [x, x]), filt.factoryKw)}</select>
     </div></div></section>
   <section class="group">
     <div class="group-title">订单列表 · 共 ${list.length} 单</div>
@@ -750,9 +747,9 @@ function contactsHtml() {
 }
 function attachmentHtml(a, mine) {
   if (!a) return "";
-  // 跟订单里的照片用同一个大图查看器，但聊天图片不需要双指缩放/双击还原那套手势
+  // 跟订单里的照片用同一个大图查看器，也一样支持双指缩放/双击还原
   if (a.isImage) return `<img class="b-img" src="${esc(a.url)}" alt="${esc(a.name)}"
-    data-gallery='${JSON.stringify([a.url])}' data-i="0" data-gestures="0" onclick="A.lightboxFromEl(this)">`;
+    data-gallery='${JSON.stringify([a.url])}' data-i="0" onclick="A.lightboxFromEl(this)">`;
   return `<a class="b-file" href="${esc(a.url)}" target="_blank" rel="noopener" download="${esc(a.name)}"
     style="${mine ? "color:#fff" : ""}"><span class="fi">📄</span>
     <span><span class="fn">${esc(a.name)}</span><br><span class="fs num">${fmtSize(a.size)}</span></span></a>`;
@@ -982,11 +979,8 @@ const A = {
     if (photoDraft[ctx]) { photoDraft[ctx].splice(i, 1); const el = $("pe-" + ctx); if (el) el.innerHTML = pickerInner(ctx); }
   },
   lightboxFromEl(el) {
-    try {
-      const gestures = el.getAttribute("data-gestures") !== "0";
-      lightbox = { photos: JSON.parse(el.getAttribute("data-gallery")), i: +el.getAttribute("data-i") || 0, gestures };
-      renderLightbox();
-    } catch (e) {}
+    try { lightbox = { photos: JSON.parse(el.getAttribute("data-gallery")), i: +el.getAttribute("data-i") || 0 }; renderLightbox(); }
+    catch (e) {}
   },
   lbStep(d) {
     if (!lightbox) return;
@@ -1086,15 +1080,6 @@ const A = {
       if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
     }, 300);
   },
-  setFFactoryKw(v) {
-    filt.factoryKw = v; clearTimeout(A._factoryKwT);
-    A._factoryKwT = setTimeout(() => {
-      render();
-      const inp = $("flt-factory");
-      if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
-    }, 300);
-  },
-
   collectScalars(section, into) {
     for (const f of state.fields[section].filter(f => f.type !== "log")) {
       if (f.type === "image") { into[f.k] = photoDraft.img || []; continue; }
@@ -1555,7 +1540,6 @@ const A = {
     const dist = Math.min(dy * 0.5, 90);
     ind.classList.add("dragging");
     ind.style.transform = `translateY(${dist}px)`;
-    ind.textContent = dist >= THRESHOLD ? "松开刷新" : "↓ 下拉刷新";
   }, { passive: true });
   document.addEventListener("touchend", async () => {
     if (!dragging) { startY = null; return; }
@@ -1565,9 +1549,9 @@ const A = {
     ind.classList.remove("dragging");
     if (dist >= THRESHOLD) {
       refreshing = true;
-      ind.style.transform = "translateY(50px)"; ind.textContent = "刷新中…";
+      ind.classList.add("spinning"); ind.style.transform = "translateY(50px)";
       try { await refresh(); render(); } catch (e) { }
-      refreshing = false;
+      refreshing = false; ind.classList.remove("spinning");
     }
     ind.style.transform = "translateY(-40px)";
     startY = null;

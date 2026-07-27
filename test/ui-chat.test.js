@@ -59,11 +59,13 @@ async function apiAs(phone, method, p, body) {
   const opts = [...filterSel.options].map(o => o.value);
   ok(opts.includes("SS" + (y + 1)) && opts.includes("FW" + (y + 1)), "季节筛选含未来季节(不再锁死在已有订单)");
 
-  // ---- 独立的工厂搜索框(带自动补全)，货号/款式名搜索框不再混着搜工厂 ----
-  ok(!!doc.getElementById("factory-datalist"), "工厂搜索框带自动补全下拉列表");
-  A.setFFactoryKw("宏发"); await sleep(400);
-  ok(app().includes("SS27-T012") && !app().includes("裙"), "按工厂关键字搜到对应订单，其它订单被过滤掉");
-  A.setFFactoryKw(""); await sleep(400);
+  // ---- 独立的工厂搜索框：跟季节筛选一样是从已有工厂列表里选，不是手打 ----
+  const factorySel = [...doc.querySelectorAll(".filters select")].find(s =>
+    [...s.options].some(o => o.value === "宏发制衣厂"));
+  ok(!!factorySel, "工厂搜索是下拉选择框(选项来自已定义的工厂列表)，不是文本输入框");
+  A.setF("factoryKw", "宏发制衣厂"); await sleep(400);
+  ok(app().includes("SS27-T012") && !app().includes("裙"), "按工厂筛选到对应订单，其它订单被过滤掉");
+  A.setF("factoryKw", ""); await sleep(400);
   A.setFKw("宏发"); await sleep(400);
   ok(!app().includes("SS27-T012"), "货号/款式名搜索框不再匹配工厂名");
   A.setFKw(""); await sleep(400);
@@ -155,14 +157,14 @@ async function apiAs(phone, method, p, body) {
   ok(sent.length === before + 1 && sent[sent.length - 1].fromMe === true
     && sent[sent.length - 1].text === "晓芳，这单交期要提前", "消息标记为自己发出");
 
-  // 聊天图片改用跟订单照片一样的大图查看器，但不带双指缩放/双击还原那套手势
+  // 聊天图片跟订单照片用同一个大图查看器，同样支持双指缩放；查看器不再显示文字提示(不管哪种图片)
   const chatImgHtml = window.eval(`attachmentHtml({isImage:true,url:"/uploads/x.jpg",name:"x.jpg"}, false)`);
-  ok(chatImgHtml.includes('onclick="A.lightboxFromEl(this)"') && chatImgHtml.includes('data-gestures="0"')
-    && !chatImgHtml.includes("target=\"_blank\""), "聊天图片点开用大图查看器，不是新开标签页");
-  window.eval(`A.lightboxFromEl({getAttribute:(n)=>({"data-gallery":'["/uploads/x.jpg"]',"data-i":"0","data-gestures":"0"}[n])})`);
+  ok(chatImgHtml.includes('onclick="A.lightboxFromEl(this)"') && !chatImgHtml.includes("target=\"_blank\""),
+    "聊天图片点开用大图查看器，不是新开标签页");
+  window.eval(`A.lightboxFromEl({getAttribute:(n)=>({"data-gallery":'["/uploads/x.jpg"]',"data-i":"0"}[n])})`);
   await sleep(100);
   const lb = doc.getElementById("lightbox");
-  ok(!!lb && !lb.innerHTML.includes("双指放大"), "聊天图片的大图查看器不显示双指缩放提示");
+  ok(!!lb && !lb.innerHTML.includes("双指放大"), "大图查看器不再显示双指缩放的文字提示(聊天/订单图片都一样)");
   A.closeLightbox(); await sleep(100);
 
   // 对方回复后，会话轮询能收到
