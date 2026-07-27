@@ -165,7 +165,7 @@ function dateFieldHtml(id, val) {
     <button type="button" class="in date-btn ${val ? "" : "empty"}" id="${id}--label" tabindex="-1"
       >${val ? esc(fmtDate(val)) : "选择日期"}</button>
     <input type="date" id="${id}" class="date-native" value="${esc(val || "")}"
-      onchange="A.syncDateLabel('${id}')" onfocus="if(this.showPicker){try{this.showPicker()}catch(e){}}"></div>`;
+      onchange="A.syncDateLabel('${id}')" onclick="A.openDate(this)" onfocus="A.openDate(this)"></div>`;
 }
 // 文件选择：隐藏原生控件（它显示英文 Choose File），用中文按钮代替
 function fileFieldHtml(id, accept, onchange, pickText) {
@@ -1001,6 +1001,11 @@ const A = {
     catch (e) { toast((e && e.error) || "修改失败"); }
   },
 
+  openDate(el) {
+    // 原生日期框只有点在日历图标那一小块才会自动弹选择器，点日期数字部分只是把光标定位过去，
+    // 不会弹出来——不管点在控件哪里都强制弹一次，避免用户以为点了没反应
+    try { if (el.showPicker) el.showPicker(); } catch (e) { }
+  },
   syncDateLabel(id) {
     const el = $(id), lab = $(id + "--label"); if (!el || !lab) return;
     lab.textContent = el.value ? fmtDate(el.value) : "选择日期";

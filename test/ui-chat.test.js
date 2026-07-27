@@ -185,8 +185,10 @@ async function apiAs(phone, method, p, body) {
   ok(doc.getElementById("nf-deadline").type === "date", "底层仍是原生日期控件（手机可调系统日期轮）");
   // 日期按钮不再靠 JS 模拟点击原生控件(showPicker，部分手机浏览器不支持导致点了没反应)，
   // 而是原生 input 直接盖满按钮区域接收真实点击/触摸，按钮本身不该再挂 onclick、也不占 Tab 顺序
-  ok(!doc.getElementById("nf-deadline--label").hasAttribute("onclick"), "日期按钮不再靠模拟点击弹出选择器(手机上更可靠)");
+  ok(!doc.getElementById("nf-deadline--label").hasAttribute("onclick"), "装饰用的日期按钮本身不挂 onclick，真正接收点击的是盖在上面的原生输入框");
   ok(doc.getElementById("nf-deadline--label").getAttribute("tabindex") === "-1", "日期按钮不占 Tab 顺序，真正可交互的是底下的原生输入框");
+  ok(doc.getElementById("nf-deadline").hasAttribute("onclick") && doc.getElementById("nf-deadline").hasAttribute("onfocus"),
+    "原生日期框点击/聚焦时都会强制弹一次系统选择器(只点在日历图标才会自动弹，点日期数字部分不会，所以要强制)");
   // 多图相册：模拟加两张已上传的照片，能显示缩略图且可点开大图
   window.eval("photoDraft.img = ['/uploads/t1.jpg','/uploads/t2.jpg']");
   const pe = doc.getElementById("pe-img"); pe.innerHTML = window.eval("pickerInner('img')");
