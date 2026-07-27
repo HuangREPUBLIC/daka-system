@@ -158,13 +158,13 @@ function fieldInput(f, val, prefix) {
 }
 const fieldRow = (f, val, prefix) => `<label class="field"><span>${esc(f.label)}</span>${fieldInput(f, val, prefix)}</label>`;
 
-// 日期：真正的 input[type=date] 藏在下面（手机上仍调起系统日期轮），
-// 上面盖一个显示「2026年8月15日」的中文按钮
+// 日期：真正的 input[type=date] 透明地盖满整个按钮区域直接接收点击/触摸(不靠 JS 模拟点击，
+// 部分手机浏览器不支持 showPicker() 会导致点了没反应)，下面露出显示「2026年8月15日」的中文按钮
 function dateFieldHtml(id, val) {
   return `<div class="datefield">
-    <input type="date" id="${id}" class="date-native" value="${esc(val || "")}" onchange="A.syncDateLabel('${id}')">
-    <button type="button" class="in date-btn ${val ? "" : "empty"}" id="${id}--label"
-      onclick="A.openDate('${id}')">${val ? esc(fmtDate(val)) : "选择日期"}</button></div>`;
+    <button type="button" class="in date-btn ${val ? "" : "empty"}" id="${id}--label" tabindex="-1"
+      >${val ? esc(fmtDate(val)) : "选择日期"}</button>
+    <input type="date" id="${id}" class="date-native" value="${esc(val || "")}" onchange="A.syncDateLabel('${id}')"></div>`;
 }
 // 文件选择：隐藏原生控件（它显示英文 Choose File），用中文按钮代替
 function fileFieldHtml(id, accept, onchange, pickText) {
@@ -1000,11 +1000,6 @@ const A = {
     catch (e) { toast((e && e.error) || "修改失败"); }
   },
 
-  openDate(id) {
-    const el = $(id); if (!el) return;
-    try { if (el.showPicker) return el.showPicker(); } catch (e) { }
-    el.focus(); el.click();
-  },
   syncDateLabel(id) {
     const el = $(id), lab = $(id + "--label"); if (!el || !lab) return;
     lab.textContent = el.value ? fmtDate(el.value) : "选择日期";

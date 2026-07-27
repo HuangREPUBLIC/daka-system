@@ -264,7 +264,12 @@ table.tbl{border-collapse:collapse;width:100%;font-size:15px;min-width:460px}
 
 /* ---------- 中文日期 / 文件选择控件 ---------- */
 .datefield,.filefield{position:relative}
-.date-native,.file-native{position:absolute;left:14px;bottom:2px;width:1px;height:1px;
+/* 日期：原生 input 盖满整个按钮直接接收点击/触摸，不依赖 showPicker()——
+   部分手机浏览器(尤其旧版 iOS Safari)不支持 showPicker()，靠 JS 模拟点击弹不出系统日期轮，
+   让用户的点击/触摸真正落在原生控件上才是跨设备最可靠的办法 */
+.date-native{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;
+  border:0;padding:0;margin:0;z-index:1}
+.file-native{position:absolute;left:14px;bottom:2px;width:1px;height:1px;
   opacity:0;pointer-events:none;border:0;padding:0;margin:0}
 .date-btn,.file-btn{display:flex;align-items:center;justify-content:space-between;gap:10px;
   text-align:left;cursor:pointer;background:var(--bg)}
