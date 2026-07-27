@@ -1520,11 +1520,12 @@ const A = {
 };
 
 /* ================= 下拉刷新 ================= */
-// 在页面顶部往下拉可以强制刷新一次数据，不用退出重进；聊天单聊里、大图查看器打开时、
+// 在页面顶部往下拉可以强制刷新一次数据，不用退出重进；不额外画指示器，
+// 刷新完成后用跟其它操作一样的 toast 提示一下就行。聊天单聊里、大图查看器打开时、
 // 弹窗打开时不生效，避免跟那些地方自己的手势/滚动冲突
 (function setupPullRefresh() {
   const THRESHOLD = 62;
-  let startY = null, dragging = false, refreshing = false;
+  let startY = null, dragging = false, dist = 0, refreshing = false;
   const canPull = () => !refreshing && me() && !modalState && !lightbox
     && !(route.v === "chat" && state.chat.activeId) && window.scrollY === 0;
   document.addEventListener("touchstart", (e) => {
@@ -1535,26 +1536,15 @@ const A = {
     if (startY == null) return;
     const dy = e.touches[0].clientY - startY;
     if (dy <= 0 || window.scrollY > 0) return;
-    dragging = true;
-    const ind = $("pull-refresh"); if (!ind) return;
-    const dist = Math.min(dy * 0.5, 90);
-    ind.classList.add("dragging");
-    ind.style.transform = `translateY(${dist}px)`;
+    dragging = true; dist = dy;
   }, { passive: true });
   document.addEventListener("touchend", async () => {
     if (!dragging) { startY = null; return; }
-    dragging = false;
-    const ind = $("pull-refresh"); if (!ind) { startY = null; return; }
-    const dist = parseFloat((ind.style.transform.match(/-?[\d.]+/) || [0])[0]) || 0;
-    ind.classList.remove("dragging");
-    if (dist >= THRESHOLD) {
-      refreshing = true;
-      ind.classList.add("spinning"); ind.style.transform = "translateY(50px)";
-      try { await refresh(); render(); } catch (e) { }
-      refreshing = false; ind.classList.remove("spinning");
-    }
-    ind.style.transform = "translateY(-40px)";
-    startY = null;
+    dragging = false; startY = null;
+    if (dist < THRESHOLD) return;
+    refreshing = true;
+    try { await refresh(); render(); toast("已刷新"); } catch (e) { }
+    refreshing = false;
   });
 })();
 

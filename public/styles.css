@@ -350,15 +350,6 @@ table.tbl{border-collapse:collapse;width:100%;font-size:15px;min-width:460px}
   transition:opacity 200ms var(--ease-out), transform 200ms var(--ease-out);pointer-events:none;max-width:86vw;text-align:center}
 .msg.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
-/* ---------- 下拉刷新（不带文字提示，只有一个圈） ---------- */
-.pull-refresh{position:fixed;left:0;right:0;top:52px;height:40px;z-index:60;
-  display:flex;align-items:center;justify-content:center;
-  transform:translateY(-40px);transition:transform 220ms var(--ease-out);pointer-events:none}
-.pull-refresh.dragging{transition:none}
-.pull-spinner{width:20px;height:20px;border-radius:50%;border:2.5px solid var(--line-2);border-top-color:var(--blue-2)}
-.pull-refresh.spinning .pull-spinner{animation:pull-spin 700ms linear infinite}
-@keyframes pull-spin{to{transform:rotate(360deg)}}
-
 /* ---------- 工厂多选(面料工厂/绣印工厂可挂多个供应商) ---------- */
 .multifactory-chips{display:flex;flex-wrap:wrap;gap:8px}
 
