@@ -238,6 +238,7 @@ async function apiAs(phone, method, p, body) {
   ok(app().includes('class="header-thumb"') || !app().includes("暂无照片"), "头部区域渲染不报错");
   ok(app().includes("生产进度") && !app().includes("加工厂明细"), "「加工厂明细」已改名「生产进度」");
   ok(app().includes(">本厂<") && app().includes(o1.values.factory), "服装工厂名称自动带入「本厂」打卡区");
+  ok(app().includes(`<span class="tag hl">${o1.values.factory}</span>`), "服装工厂名称用高亮样式(.tag.hl)展示");
   // 生产工序/车工人数/预计下车时间不单独列成带"—"的独立行(row-label)，跟服装工厂绑在一起显示
   ok(!app().includes('<div class="row-label">生产工序</div>'), "生产工序不再单独列成一行");
   await apiAs("13800000000", "PATCH", `/orders/${o1.id}`,
@@ -245,6 +246,8 @@ async function apiAs(phone, method, p, body) {
   await window.eval("refresh()"); window.go("detail", o1.id); await sleep(300);
   ok(!app().includes('<div class="row-label">生产工序</div>') && app().includes("生产工序：车缝") && app().includes("车工人数：9"),
     "生产工序/车工人数/预计下车时间跟服装工厂合并展示成一行，不是独立字段");
+  const mainFieldsText = "生产工序：车缝 · 车工人数：9 · 预计下车：2026年8月12日";
+  ok(app().split(mainFieldsText).length - 1 === 2, "生产工序等信息在「服装工厂」和「本厂」两处都展示");
   ok(!app().includes("验货日期"), "验货问题不再要求选日期");
   ok(app().includes("发货日期") && app().indexOf("包装进度") < app().indexOf("发货日期"), "发货日期排在包装进度后面");
 

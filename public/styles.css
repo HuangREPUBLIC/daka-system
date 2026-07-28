@@ -155,6 +155,7 @@ textarea.in{min-height:92px;resize:vertical;line-height:1.45}
 .tag.off{background:var(--bad-soft);color:var(--bad)}
 .tag.role{background:var(--bg);color:var(--ink-2);box-shadow:inset 0 0 0 .5px var(--line-2)}
 .tag.season{background:var(--blue-2);color:#fff;font-weight:700;padding:3px 10px}
+.tag.hl{background:var(--blue-2);color:#fff;font-weight:700;padding:3px 10px}
 .badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;
   border-radius:99px;background:var(--bad);color:#fff;font-size:11px;font-weight:600;line-height:1}
 

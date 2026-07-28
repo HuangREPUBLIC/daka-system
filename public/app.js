@@ -649,7 +649,7 @@ function vDetail() {
     ? `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
         <div class="row-value">${dateFieldHtml("qd-" + o.id + "-" + f.k, o.values[f.k], `A.quickSetDate('${o.id}','${f.k}',this.value)`)}</div></div>`
     : `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div>${f.k === "factory" ? mainFieldsLine : ""}</div>
-        <div class="row-value">${esc(displayVal(o, f)) || "—"}</div></div>`).join("");
+        <div class="row-value">${f.k === "factory" && o.values.factory ? `<span class="tag hl">${esc(o.values.factory)}</span>` : (esc(displayVal(o, f)) || "—")}</div></div>`).join("");
   // 订单交期/发货日期已经能在详情页直接点选修改，编辑表单里不再重复出现
   const editForm = s => {
     const fs = scalars(s).filter(f => !isQuickDateField(f));
@@ -697,8 +697,9 @@ function vDetail() {
       <div class="logfield" style="padding-top:0">
         <div style="margin-top:10px;border-top:.5px solid var(--line);padding-top:10px">
           <div class="lf-head" style="font-size:14.5px"><span>本厂</span>
-            <span class="tag role">${esc(o.values.factory) || "未指定"}</span>
+            <span class="tag hl">${esc(o.values.factory) || "未指定"}</span>
             ${canProdLog ? `<button class="btn mini right" onclick="A.toggleAdd('mainLog')">＋ 打卡</button>` : ""}</div>
+          ${mainFieldsLine}
           ${canProdLog ? `<div class="addbox" id="add-mainLog">
             <textarea class="in" id="txt-mainLog" placeholder="本厂生产进度（可写文字/传照片）…"></textarea>
             ${photoPicker("log:mainLog")}
