@@ -331,6 +331,15 @@ async function apiAs(phone, method, p, body) {
   ok(!win2.eval("showWelcome") && win2.document.getElementById("app").innerHTML.includes("订单列表"),
     "欢迎界面展示一会儿后自动进入正常页面");
 
+  // ---- 本地数据缓存：像微信一样，下次打开先用上次缓存瞬间显示，不用干等网络 ----
+  const cachedRaw = win2.localStorage.getItem("daka_cache_v1");
+  ok(!!cachedRaw, "刷新成功后会把订单/用户等数据缓存到本地(daka_cache_v1)");
+  const cached = JSON.parse(cachedRaw || "{}");
+  ok(cached.token === freshToken && Array.isArray(cached.orders) && cached.orders.length > 0,
+    "本地缓存的数据里包含当前账号 token 和订单列表");
+  win2.eval("state.orders = []; loadStateCache();");
+  ok(win2.eval("state.orders.length") > 0, "loadStateCache() 能把本地缓存的数据立即同步回 state，不用等网络返回");
+
   console.log(`\n结果：PASS ${pass}, FAIL ${fail}`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error("ERROR", e); process.exit(1); });

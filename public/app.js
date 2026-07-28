@@ -113,6 +113,26 @@ async function refresh() {
   state.me = b.me; state.users = b.users; state.fields = b.fields;
   state.factories = b.factories; state.orders = b.orders; state.roles = b.roles || [];
   state.seasons = b.seasons || [];
+  saveStateCache();
+}
+// 本地缓存上一次的订单/用户/字段等数据：下次打开先用它瞬间显示，不用干等网络，
+// 后台悄悄刷新到最新——跟账号 token 绑定，换账号/退出登录就失效，不会串到别人的数据
+const STATE_CACHE_KEY = "daka_cache_v1";
+function saveStateCache() {
+  try {
+    localStorage.setItem(STATE_CACHE_KEY, JSON.stringify({
+      token: state.token, me: state.me, users: state.users, fields: state.fields,
+      factories: state.factories, orders: state.orders, roles: state.roles, seasons: state.seasons
+    }));
+  } catch (e) { /* 存储满了/不可用就算了，不影响功能 */ }
+}
+function loadStateCache() {
+  try {
+    const c = JSON.parse(localStorage.getItem(STATE_CACHE_KEY) || "null");
+    if (!c || c.token !== state.token) return;
+    state.me = c.me; state.users = c.users; state.fields = c.fields;
+    state.factories = c.factories; state.orders = c.orders; state.roles = c.roles; state.seasons = c.seasons;
+  } catch (e) { /* 缓存损坏就忽略，走正常的网络加载 */ }
 }
 async function run(fn, okMsg) {
   try { await fn(); await refresh(); render(); if (okMsg) toast(okMsg); }
@@ -994,9 +1014,9 @@ const A = {
       const r = await api("POST", "/login", { phone, password });
       state.token = r.token; localStorage.setItem("daka_token", r.token);
       showWelcome = true; render();   // 密码验证通过就先顶上欢迎界面，不用等 bootstrap 接口回来
-      await refresh();
+      await Promise.all([refresh(), new Promise(res => setTimeout(res, 1500))]);
       go("orders");
-      setTimeout(A.dismissWelcome, 1500);
+      A.dismissWelcome();
     } catch (e) {
       // 只有「密码对了但 bootstrap 接口失败」才需要把已经顶上的欢迎界面收回去；
       // 单纯密码错误时 showWelcome 还是 false，不用重渲染，否则会把用户刚输入的手机号也清空
@@ -1046,7 +1066,7 @@ const A = {
       onOk: () => A.forceLogout() });
   },
   forceLogout() {
-    state.token = null; state.me = null; localStorage.removeItem("daka_token");
+    state.token = null; state.me = null; localStorage.removeItem("daka_token"); localStorage.removeItem(STATE_CACHE_KEY);
     route = { v: "orders", id: null }; render();
   },
   async changeMyPw() {
@@ -1567,12 +1587,14 @@ window.addEventListener("appinstalled", () => { deferredInstall = null; toast("�
   // index.html 里已经有一份静态的欢迎界面兜底，JS 跑起来之前手机屏幕就不会是空的；
   // 这里只需要在数据没回来之前维持住同一份内容，不要提前露出正在加载的空页面。
   if (state.token) {
+    loadStateCache();   // 先用上次缓存的数据把订单/用户列表填上，不用干等网络才有内容
     showWelcome = true; render();
-    try { await refresh(); }
-    catch (e) { state.token = null; localStorage.removeItem("daka_token"); showWelcome = false; }
+    const refreshP = refresh().catch(e => { state.token = null; localStorage.removeItem("daka_token"); showWelcome = false; });
+    // 欢迎界面至少展示1.5秒；网络数据这期间基本已经回来了，两者谁慢等谁，不再叠加着算
+    await Promise.all([refreshP, new Promise(r => setTimeout(r, 1500))]);
   }
   render();
-  if (showWelcome) setTimeout(A.dismissWelcome, 1500);
+  if (showWelcome) A.dismissWelcome();
   if (state.me) { A.refreshUnread(); A.loadContacts(true); }
   setInterval(() => { if (state.me) A.refreshUnread(); }, 10000);
   setInterval(() => {
