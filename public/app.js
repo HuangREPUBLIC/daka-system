@@ -73,7 +73,7 @@ const userById = id => state.users.find(u => u.id === id);
 const uname = id => (userById(id) || {}).name || "";
 const me = () => state.me;
 const isAdmin = () => me() && me().template === "admin";
-const canCreateOrder = () => me() && (me().template === "admin" || me().template === "sales");
+const canCreateOrder = () => !!me();
 const roleLabelOf = u => (u ? (u.roleLabel || (u.role === "admin" ? "管理员" : u.role)) : "");
 const labelForRoleKey = k => k === "admin" ? "管理员" : ((state.roles.find(r => r.k === k) || {}).label || k);
 const COMPANY_NAME = "天津锦利国际贸易有限公司";
@@ -120,24 +120,11 @@ async function run(fn, okMsg) {
 }
 
 /* ================= 权限（仅用于显示控制） ================= */
-function canEditBasic(o) {
-  const m = me(); if (!m) return false;
-  if (m.template === "admin") return true;
-  return m.template === "sales" && (o.createdBy === m.id || o.values.sales === m.id);
-}
-function canAddLog(o, section) {
-  const m = me(); if (!m) return false;
-  if (m.template === "admin") return true;
-  if (o.values.follower === m.id) return true;
-  // 订单明细/生产明细的进度打卡，本单业务员也能写（跟单过程中经常要帮着记录）；
-  // 但这不代表业务员能填验货「整改情况」，那个权限单独判断，见 canWriteInspFix
-  if ((section === "order" || section === "production") && canEditBasic(o)) return true;
-  return false;
-}
-const canTouchEntry = e => { const m = me(); return m && (m.template === "admin" || e.by === m.id); };
-// 验货「发现问题」只有业务员/管理员能写；「整改情况」只有本单负责下厂员/管理员能写(业务员没有这个权利)
-const canWriteInspProblem = () => { const m = me(); return m && (m.template === "admin" || m.template === "sales"); };
-const canWriteInspFix = o => { const m = me(); return m && (m.template === "admin" || o.values.follower === m.id); };
+function canEditBasic(o) { return !!me(); }
+function canAddLog(o, section) { return !!me(); }
+const canTouchEntry = e => !!me();
+const canWriteInspProblem = () => !!me();
+const canWriteInspFix = o => !!me();
 
 /* ================= 字段与下拉 ================= */
 function optionsFor(f) {
@@ -197,12 +184,12 @@ function factoryMultiHtml(f, val, id) {
 
 // 日期：真正的 input[type=date] 透明地盖满整个按钮区域直接接收点击/触摸(不靠 JS 模拟点击，
 // 部分手机浏览器不支持 showPicker() 会导致点了没反应)，下面露出显示「2026年8月15日」的中文按钮
-function dateFieldHtml(id, val) {
+function dateFieldHtml(id, val, extraOnChange) {
   return `<div class="datefield">
     <button type="button" class="in date-btn ${val ? "" : "empty"}" id="${id}--label" tabindex="-1"
       >${val ? esc(fmtDate(val)) : "选择日期"}</button>
     <input type="date" id="${id}" class="date-native" value="${esc(val || "")}"
-      onchange="A.syncDateLabel('${id}')" onclick="A.openDate(this)" onfocus="A.openDate(this)"></div>`;
+      onchange="${extraOnChange ? extraOnChange + ";" : ""}A.syncDateLabel('${id}')" onclick="A.openDate(this)" onfocus="A.openDate(this)"></div>`;
 }
 // 文件选择：隐藏原生控件（它显示英文 Choose File），用中文按钮代替
 function fileFieldHtml(id, accept, onchange, pickText) {
@@ -459,7 +446,7 @@ function latestLog(o) {
   return best;
 }
 function vOrders() {
-  const factoriesOf = o => [o.values.factory, o.values.fabricFactory, o.values.embFactory].flat().filter(Boolean);
+  const factoriesOf = o => [o.values.factory, o.values.fabricFactory1, o.values.fabricFactory2, o.values.embFactory, o.values.printFactory].flat().filter(Boolean);
   const list = state.orders.filter(o =>
     (!filt.season || o.season === filt.season) &&
     (!filt.sales || o.values.sales === filt.sales) &&
@@ -617,17 +604,23 @@ function vDetail() {
   if (!o) return `<div class="card"><div class="empty">订单不存在</div></div>`;
   const scalars = s => state.fields[s].filter(f => f.type !== "log");
   const logsOf = s => state.fields[s].filter(f => f.type === "log");
-  const kv = fs => fs.map(f => `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
-      <div class="row-value">${esc(displayVal(o, f)) || "—"}</div></div>`).join("");
   const canB = canEditBasic(o), canOrdLog = canAddLog(o, "order"), canProdLog = canAddLog(o, "production");
   const canInsp = canWriteInspProblem(), canFix = canWriteInspFix(o);
-  const editForm = s => `<div class="grid2">${scalars(s).map(f => fieldRow(f, o.values[f.k] || "")).join("")}</div>`;
+  // 日期字段(订单交期/发货日期等)：有编辑权限时直接在详情页点选就改，不用进编辑页
+  const kv = fs => fs.map(f => f.type === "date" && canB
+    ? `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
+        <div class="row-value">${dateFieldHtml("qd-" + o.id + "-" + f.k, o.values[f.k], `A.quickSetDate('${o.id}','${f.k}',this.value)`)}</div></div>`
+    : `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
+        <div class="row-value">${esc(displayVal(o, f)) || "—"}</div></div>`).join("");
+  // 日期字段已经能在详情页直接点选修改，编辑表单里不再重复出现
+  const editForm = s => `<div class="grid2">${scalars(s).filter(f => f.type !== "date").map(f => fieldRow(f, o.values[f.k] || "")).join("")}</div>`;
   const photos = normalizePhotos(o.values.img);
   const headerThumb = photos.length ? `<img src="${esc(photos[0])}" alt="款式图" class="header-thumb"
     data-gallery='${JSON.stringify(photos)}' data-i="0" onclick="A.lightboxFromEl(this)">` : "";
-  const shipDateField = state.fields.production.find(f => f.k === "shipDate");
-  const topProdScalars = scalars("production").filter(f => f.k !== "shipDate");
-  const orderKvFields = scalars("order").filter(f => f.type !== "image");
+  const dateFieldsProd = scalars("production").filter(f => f.type === "date");
+  const topProdScalars = scalars("production").filter(f => f.type !== "date");
+  const orderKvFields = scalars("order").filter(f => f.type !== "image" && f.type !== "date");
+  const dateFieldsOrder = scalars("order").filter(f => f.type === "date");
 
   return `<section class="group">
     <div class="card"><div class="card-pad" style="display:flex;align-items:center;gap:14px">
@@ -646,6 +639,7 @@ function vDetail() {
          <div class="group-title" style="padding-top:12px">生产安排字段</div>${editForm("production")}
          <div class="btn-row"><button class="btn" onclick="A.saveBasic('${o.id}')">保存修改</button></div>`
       : kv(orderKvFields)}</div>
+    ${dateFieldsOrder.length ? `<div class="card" style="margin-top:14px">${kv(dateFieldsOrder)}</div>` : ""}
     <div class="card" style="margin-top:14px">${logsOf("order").map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canOrdLog)).join("")}</div>
   </section>
 
@@ -658,10 +652,10 @@ function vDetail() {
       <div class="prodgroup-title"><span>生产进度</span></div>
       <div class="logfield" style="padding-top:0">
         <div style="margin-top:10px;border-top:.5px solid var(--line);padding-top:10px">
-          <div class="lf-head" style="font-size:14.5px"><span>主厂</span>
+          <div class="lf-head" style="font-size:14.5px"><span>本厂</span>
             <span class="tag role">${esc(o.values.factory) || "未指定"}</span>
             ${canProdLog ? `<button class="btn mini right" onclick="A.toggleAdd('mainLog')">＋ 打卡</button>` : ""}</div>
-          ${canProdLog ? mainSubAddBoxHtml(o.id, "mainLog", "主厂生产进度（补充说明，选填）…") : ""}
+          ${canProdLog ? mainSubAddBoxHtml(o.id, "mainLog", "本厂生产进度（补充说明，选填）…") : ""}
           ${logEntriesHtml(o.mainLog, o.id, "mainLog")}</div>
         ${(o.subs || []).map(s => subCardHtml(o, s, canProdLog)).join("")}
         ${canProdLog ? `<div style="margin-top:10px;border-top:.5px solid var(--line);padding-top:10px">
@@ -669,7 +663,7 @@ function vDetail() {
       </div>
       ${logsOf("production").filter(f => !["preSample", "cutting"].includes(f.k)).map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canProdLog)).join("")}
     </div>
-    ${shipDateField ? `<div class="card" style="margin-top:14px">${kv([shipDateField])}</div>` : ""}
+    ${dateFieldsProd.length ? `<div class="card" style="margin-top:14px">${kv(dateFieldsProd)}</div>` : ""}
   </section>
 
   <section class="group">
@@ -887,7 +881,7 @@ function vAdmin() {
 
   <section class="group">
     <div class="group-title">工厂下拉选项</div>
-    <div class="card">${[["fabric", "面料工厂"], ["emb", "绣印工厂"], ["prod", "生产厂"]].map(([k, t]) => `
+    <div class="card">${[["fabric", "面料工厂"], ["emb", "绣花/印花工厂"], ["prod", "服装工厂"]].map(([k, t]) => `
       <div class="card-pad" style="padding-bottom:10px">
         <div class="row-sub" style="margin-bottom:6px">${t}</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${state.factories[k].map(x =>
@@ -1067,6 +1061,10 @@ const A = {
     const el = $(id), lab = $(id + "--label"); if (!el || !lab) return;
     lab.textContent = el.value ? fmtDate(el.value) : "选择日期";
     lab.classList.toggle("empty", !el.value);
+  },
+  // 订单交期/发货日期等日期字段：不用进编辑页，详情页里直接点选就改，PATCH 是合并语义(只传这一个字段)
+  async quickSetDate(oid, key, val) {
+    await run(() => api("PATCH", "/orders/" + oid, { values: { [key]: val } }), "已更新");
   },
   syncFileName(id, name) {
     const el = $(id + "--name"); if (el) el.textContent = name || "未选择文件";
@@ -1420,8 +1418,11 @@ const A = {
   // 表头列名 -> 字段
   importMap() {
     return { "货号": "styleNo", "款式名": "styleName", "款式": "style", "数量": "qty", "款式描述": "desc",
-      "订单交期": "deadline", "交期": "deadline", "面料工厂": "fabricFactory", "业务员": "sales", "下厂员": "follower",
-      "季节": "_season", "订单季节": "_season", "绣印工厂": "embFactory", "生产厂": "factory" };
+      "订单交期": "deadline", "交期": "deadline", "业务员": "sales", "下厂员": "follower",
+      "季节": "_season", "订单季节": "_season",
+      "服装工厂": "factory", "生产厂": "factory", // 生产厂 是旧表头，兼容老导入模板
+      "面料工厂1": "fabricFactory1", "面料工厂2": "fabricFactory2", "面料工厂": "fabricFactory1", // 面料工厂 是旧表头，导入进面料工厂1
+      "绣花工厂": "embFactory", "印花工厂": "printFactory", "绣印工厂": "embFactory" }; // 绣印工厂 是旧表头，兼容老导入模板
   },
   // 二维数组（首行表头）-> 待确认的订单列表
   rowsToPreview(grid) {

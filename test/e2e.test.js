@@ -118,9 +118,10 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   doc.getElementById("lg-phone").value = "13877778888"; // 刘敏
   doc.getElementById("lg-pass").value = "123456";
   await A.login(); A.dismissWelcome(); await sleep(400);
-  ok(!app().includes('data-tab="admin"') && !app().includes("go('new')"), "下厂员看不到管理 Tab 和新建订单入口");
+  ok(!app().includes('data-tab="admin"'), "下厂员看不到管理 Tab");
+  ok(app().includes("go('new')"), "权限统一后，下厂员也能看到新建订单入口");
   window.go("detail", o1.id); await sleep(250); // o1 归王建国
-  ok(!app().includes("txt-cutting"), "下厂员在别人订单上没有打卡框");
+  ok(app().includes("txt-cutting"), "权限统一后，下厂员在别人订单上也有打卡框");
 
   console.log(`\n结果：PASS ${pass}, FAIL ${fail}`);
   process.exit(fail ? 1 : 0);

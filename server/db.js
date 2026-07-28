@@ -150,12 +150,46 @@ function ensureDefaults() {
     const idx = fields.production.findIndex(f => f.k === "factory");
     if (idx >= 0) {
       const [factoryField] = fields.production.splice(idx, 1);
-      const fabIdx = fields.order.findIndex(f => f.k === "fabricFactory");
+      const fabIdx = fields.order.findIndex(f => f.k === "fabricFactory" || f.k === "fabricFactory1");
       const embIdx = fields.order.findIndex(f => f.k === "embFactory");
       const insertAt = fabIdx >= 0 ? fabIdx : (embIdx >= 0 ? embIdx : fields.order.length);
       fields.order.splice(insertAt, 0, factoryField);
       setSetting("fields", fields);
       console.log("[db] 已将「生产厂」字段从生产明细挪到订单明细(面料工厂前面)");
+    }
+  }
+  // 老库标签重命名：主厂/生产厂 -> 本厂/服装工厂（只改显示文案，不动字段 key，数据不受影响）
+  if (fields && fields.order) {
+    const factoryF = fields.order.find(f => f.k === "factory" && f.label === "生产厂");
+    if (factoryF) {
+      factoryF.label = "服装工厂";
+      setSetting("fields", fields);
+      console.log("[db] 已将「生产厂」字段标签改名为「服装工厂」");
+    }
+  }
+  // 老库拆分「面料工厂」为「面料工厂1」/「面料工厂2」，两个字段都保留动态多选(chip)UI；
+  // 已有数据整体挪进 fabricFactory1，fabricFactory2 留空，员工可以自己再补填
+  if (fields && fields.order) {
+    const oldIdx = fields.order.findIndex(f => f.k === "fabricFactory");
+    const hasSplit = fields.order.some(f => f.k === "fabricFactory1");
+    if (oldIdx >= 0 && !hasSplit) {
+      fields.order.splice(oldIdx, 1,
+        { k: "fabricFactory1", label: "面料工厂1", type: "factory-fabric" },
+        { k: "fabricFactory2", label: "面料工厂2", type: "factory-fabric" });
+      setSetting("fields", fields);
+      console.log("[db] 已将「面料工厂」拆分为「面料工厂1」「面料工厂2」");
+    }
+  }
+  // 老库拆分「绣印工厂」为「绣花工厂」(沿用 embFactory 这个 key，数据不用搬)/「印花工厂」(新字段 printFactory)
+  if (fields && fields.order) {
+    const embF = fields.order.find(f => f.k === "embFactory");
+    const hasPrintFactory = fields.order.some(f => f.k === "printFactory");
+    if (embF && !hasPrintFactory) {
+      embF.label = "绣花工厂";
+      const embIdx = fields.order.findIndex(f => f.k === "embFactory");
+      fields.order.splice(embIdx + 1, 0, { k: "printFactory", label: "印花工厂", type: "factory-emb" });
+      setSetting("fields", fields);
+      console.log("[db] 已将「绣印工厂」拆分为「绣花工厂」「印花工厂」");
     }
   }
   migrateOrdersSchema();
@@ -175,6 +209,12 @@ function migrateOrdersSchema() {
   rows.forEach(r => {
     const d = JSON.parse(r.data);
     let touched = false;
+    // 「面料工厂」拆分为「面料工厂1」/「面料工厂2」：老数据整体搬进 fabricFactory1
+    if (d.values && d.values.fabricFactory !== undefined && d.values.fabricFactory1 === undefined) {
+      d.values.fabricFactory1 = d.values.fabricFactory;
+      delete d.values.fabricFactory;
+      touched = true;
+    }
     if (!Array.isArray(d.mainLog)) { d.mainLog = []; touched = true; }
     if (!Array.isArray(d.subs)) { d.subs = []; touched = true; }
     else {
@@ -248,9 +288,11 @@ function seedIfEmpty() {
       { k: "deadline", label: "订单交期", type: "date" },
       { k: "fabricProg", label: "面料进度", type: "log" },
       { k: "embProg", label: "绣印进度", type: "log" },
-      { k: "factory", label: "生产厂", type: "factory-prod" },
-      { k: "fabricFactory", label: "面料工厂", type: "factory-fabric" },
-      { k: "embFactory", label: "绣印工厂", type: "factory-emb" }
+      { k: "factory", label: "服装工厂", type: "factory-prod" },
+      { k: "fabricFactory1", label: "面料工厂1", type: "factory-fabric" },
+      { k: "fabricFactory2", label: "面料工厂2", type: "factory-fabric" },
+      { k: "embFactory", label: "绣花工厂", type: "factory-emb" },
+      { k: "printFactory", label: "印花工厂", type: "factory-emb" }
     ],
     production: [
       { k: "follower", label: "下厂员", type: "user-follower", core: true },

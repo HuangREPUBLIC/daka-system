@@ -274,7 +274,7 @@ router.delete("/seasons/:name", A.adminRequired, (req, res) => {
 /* =========================================================
  *  订单
  * ========================================================= */
-function canCreateOrder(u) { const t = A.templateOf(u); return t === "admin" || t === "sales"; }
+function canCreateOrder(u) { return !!u; }
 
 router.get("/orders", (req, res) => res.json(allOrdersPublic()));
 router.get("/orders/:id", (req, res) => {
@@ -481,7 +481,7 @@ router.delete("/orders/:id/inspections/:inspId", (req, res) => {
   if (!o) return res.status(404).json({ error: "订单不存在" });
   const g = o.data.inspections.find(x => x.id === req.params.inspId);
   if (!g) return res.status(404).json({ error: "记录不存在" });
-  if (!(req.user.role === "admin" || g.by === req.user.id)) return res.status(403).json({ error: "只能删除自己创建的验货记录" });
+  if (!A.canTouchEntry(req.user, g)) return res.status(403).json({ error: "只能删除自己创建的验货记录" });
   o.data.inspections = o.data.inspections.filter(x => x.id !== g.id); saveOrder(o);
   res.json(orderPublic(loadOrder(o.id)));
 });

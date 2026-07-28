@@ -27,8 +27,8 @@ async function call(method, path, token, body) {
   const sT = (await call("POST", "/login", null, { phone: "13811112222", password: "123456" })).j.token; // 陈晓芳
   const fT = (await call("POST", "/login", null, { phone: "13877778888", password: "123456" })).j.token; // 刘敏(负责 o2)
 
-  // follower cannot log on o1 (归王建国)
-  ok((await call("POST", `/orders/${o1.id}/logs`, fT, { key: "cutting", text: "非法" })).status === 403, "下厂员无权在别人订单打卡");
+  // 权限统一：下厂员现在也能在别人负责的订单上打卡
+  ok((await call("POST", `/orders/${o1.id}/logs`, fT, { key: "cutting", text: "非本单下厂员打卡" })).status === 200, "权限统一后，下厂员也能在别人订单打卡");
   // admin can log
   const al = await call("POST", `/orders/${o1.id}/logs`, aT, { key: "cutting", text: "管理员打卡测试" });
   ok(al.status === 200 && al.j.logs.cutting.some(e => e.text === "管理员打卡测试" && e.byName === "老板"), "管理员打卡并自动记名");
@@ -37,10 +37,10 @@ async function call(method, path, token, body) {
   ok((await call("POST", `/orders/${o1.id}/logs`, sT, { key: "ironing", text: "业务员也能打卡" })).status === 200, "本单业务员也能在生产明细打卡");
   // sales edit basic ok; follower cannot
   ok((await call("PATCH", `/orders/${o1.id}`, sT, { values: { fabric: "改过的面料" } })).status === 200, "业务员改自己订单基本信息");
-  ok((await call("PATCH", `/orders/${o1.id}`, fT, { values: { fabric: "x" } })).status === 403, "下厂员不能改基本信息");
+  ok((await call("PATCH", `/orders/${o1.id}`, fT, { values: { fabric: "x" } })).status === 200, "权限统一后，下厂员也能改基本信息");
 
-  // create order: follower forbidden, sales ok
-  ok((await call("POST", "/orders", fT, { season: "SS2027", values: { styleNo: "X" } })).status === 403, "下厂员不能建单");
+  // create order: 权限统一后 follower 也能建单
+  ok((await call("POST", "/orders", fT, { season: "SS2027", values: { styleNo: "X" } })).status === 200, "权限统一后，下厂员也能建单");
   const co = await call("POST", "/orders", sT, { season: "SS2027", values: { styleNo: "NEW-1", styleName: "新单" } });
   ok(co.status === 200 && co.j.values.sales === chen.id, "业务员建单并自动带上自己");
 

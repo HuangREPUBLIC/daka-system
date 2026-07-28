@@ -40,13 +40,13 @@ r = spawnSync(process.execPath, ["-e", `
 `], { encoding: "utf8", env: Object.assign({}, process.env, { DATA_DIR }) });
 ok(r.stdout.includes("跟单主管"), "已有职位配置不会被覆盖");
 
-// 4) 老库的「面料」文本字段要能自动换成「面料工厂」下拉，且不影响管理员自己加的字段
+// 4) 老库的「面料」文本字段要能自动链式换成「面料工厂1」「面料工厂2」，且不影响管理员自己加的字段
 r = spawnSync(process.execPath, ["-e", `
   process.env.DATA_DIR = ${JSON.stringify(DATA_DIR)};
   const d = require(${JSON.stringify(dbPath)});
   d.seedIfEmpty();
   const fields = d.getSetting("fields", { order: [], production: [] });
-  fields.order = fields.order.filter(f => f.k !== "fabricFactory");
+  fields.order = fields.order.filter(f => f.k !== "fabricFactory1" && f.k !== "fabricFactory2");
   fields.order.splice(fields.order.findIndex(f => f.k === "embFactory"), 0, { k: "fabric", label: "面料", type: "text" });
   fields.order.push({ k: "custom1", label: "管理员自定义字段", type: "text" });
   d.setSetting("fields", fields);
@@ -55,10 +55,49 @@ r = spawnSync(process.execPath, ["-e", `
   console.log(JSON.stringify(after.map(f => f.k)));
 `], { encoding: "utf8", env: Object.assign({}, process.env, { DATA_DIR }) });
 const migrated = (r.stdout.trim().split("\n").pop() || "");
-ok(r.status === 0 && migrated.includes("fabricFactory") && !migrated.includes('"fabric"'), "老库「面料」自动换成「面料工厂」");
+ok(r.status === 0 && migrated.includes('"fabricFactory1"') && migrated.includes('"fabricFactory2"') && !migrated.includes('"fabric"') && !migrated.includes('"fabricFactory"'),
+  "老库「面料」自动链式换成「面料工厂1」「面料工厂2」，不残留旧的单一 fabricFactory");
 ok(migrated.includes("custom1"), "迁移过程不影响管理员自己加的字段");
 const keys = JSON.parse(migrated);
-ok(keys.indexOf("fabricFactory") < keys.indexOf("embFactory"), "面料工厂排在绣印工厂前面");
+ok(keys.indexOf("fabricFactory1") < keys.indexOf("embFactory"), "面料工厂1排在绣印工厂前面");
+
+// 4b) 已经在用单一「面料工厂」字段(本次拆分前的真实老库状态) 的库，升级后要能正确拆分成 面料工厂1/2，
+//     绣印工厂改名绣花工厂+新增印花工厂，生产厂改名服装工厂；已有订单数据不丢，且可重复运行(幂等)
+const preSplitFields = { order: [
+  { k: "sales", label: "业务员", type: "user-sales", core: true },
+  { k: "styleNo", label: "货号", type: "text" },
+  { k: "factory", label: "生产厂", type: "factory-prod" },
+  { k: "fabricFactory", label: "面料工厂", type: "factory-fabric" },
+  { k: "embFactory", label: "绣印工厂", type: "factory-emb" }
+], production: [] };
+r = spawnSync(process.execPath, ["-e", `
+  process.env.DATA_DIR = ${JSON.stringify(DATA_DIR)};
+  const d = require(${JSON.stringify(dbPath)});
+  d.seedIfEmpty();
+  d.setSetting("fields", ${JSON.stringify(preSplitFields)});
+  d.db.prepare("DELETE FROM orders").run();
+  d.db.prepare("INSERT INTO orders(id,season,created_by,created_at,updated_at,data) VALUES(?,?,?,?,?,?)")
+    .run("presplit1", "SS2026", "u1", 1, 1, JSON.stringify({
+      values: { styleNo: "PS-1", factory: "宏发制衣厂", fabricFactory: ["恒信面料行"], embFactory: ["华艺印花厂"] },
+      logs: {}, mainLog: [], subs: [], inspections: [], followIssues: [] }));
+  d.ensureDefaults();
+  d.ensureDefaults();
+  const fo = d.getSetting("fields", { order: [] }).order;
+  const row = JSON.parse(d.db.prepare("SELECT data FROM orders WHERE id='presplit1'").get().data);
+  console.log(JSON.stringify({ fieldKeys: fo.map(f => f.k), factoryLabel: fo.find(f=>f.k==="factory").label,
+    embLabel: fo.find(f=>f.k==="embFactory").label, values: row.values }));
+`], { encoding: "utf8", env: Object.assign({}, process.env, { DATA_DIR }) });
+ok(r.status === 0, "老库(单一fabricFactory字段)升级两次都不报错(幂等)");
+const presplitOut = JSON.parse((r.stdout.trim().split("\n").pop() || "{}"));
+ok(presplitOut.fieldKeys.includes("fabricFactory1") && presplitOut.fieldKeys.includes("fabricFactory2") && !presplitOut.fieldKeys.includes("fabricFactory"),
+  "已有的单一「面料工厂」字段升级后拆分为「面料工厂1」「面料工厂2」");
+ok(presplitOut.fieldKeys.includes("printFactory"), "升级后新增「印花工厂」字段");
+ok(presplitOut.factoryLabel === "服装工厂", "「生产厂」标签升级后改名「服装工厂」");
+ok(presplitOut.embLabel === "绣花工厂", "「绣印工厂」标签升级后改名「绣花工厂」");
+ok(Array.isArray(presplitOut.values.fabricFactory1) && presplitOut.values.fabricFactory1[0] === "恒信面料行" && presplitOut.values.fabricFactory === undefined,
+  "已有订单的面料工厂数据整体搬进 fabricFactory1，不丢失");
+ok(Array.isArray(presplitOut.values.embFactory) && presplitOut.values.embFactory[0] === "华艺印花厂",
+  "已有订单的绣印工厂数据保留在 embFactory(现「绣花工厂」)，不受影响");
 
 // 5) 老结构的订单（subs 是固定4条、无 id；inspections 用 date+items 无 id）
 //    要能安全迁移到新的"生产进度(mainLog+动态加工点)"/"验货问题(id化)"结构，且可重复运行

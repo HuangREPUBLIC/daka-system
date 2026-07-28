@@ -230,9 +230,21 @@ async function apiAs(phone, method, p, body) {
   ok(app().includes("女装印花短袖T恤 圆领短袖"), "头部把款式名+款式合并显示");
   ok(app().includes('class="header-thumb"') || !app().includes("暂无照片"), "头部区域渲染不报错");
   ok(app().includes("生产进度") && !app().includes("加工厂明细"), "「加工厂明细」已改名「生产进度」");
-  ok(app().includes(">主厂<") && app().includes(o1.values.factory), "主厂名称自动带入订单生产厂字段");
+  ok(app().includes(">本厂<") && app().includes(o1.values.factory), "服装工厂名称自动带入「本厂」打卡区");
   ok(!app().includes("验货日期"), "验货问题不再要求选日期");
   ok(app().includes("发货日期") && app().indexOf("包装进度") < app().indexOf("发货日期"), "发货日期排在包装进度后面");
+
+  // 订单交期/发货日期：不进编辑页也能在详情页直接点选修改，编辑表单里不再重复出现
+  ok(!!doc.getElementById(`qd-${o1.id}-deadline`) && doc.getElementById(`qd-${o1.id}-deadline`).type === "date", "订单交期在详情页直接可点选(不用进编辑页)");
+  ok(!!doc.getElementById(`qd-${o1.id}-shipDate`) && doc.getElementById(`qd-${o1.id}-shipDate`).type === "date", "发货日期在详情页直接可点选(不用进编辑页)");
+  A.toggleBasic(); await sleep(150);
+  ok(!app().includes('id="nf-deadline"') && !app().includes('id="nf-shipDate"'), "编辑表单里不再重复出现订单交期/发货日期");
+  ok(!!doc.getElementById(`qd-${o1.id}-deadline`) && !!doc.getElementById(`qd-${o1.id}-shipDate`), "编辑模式下日期字段仍在详情页可直接点选");
+  A.toggleBasic(); await sleep(150); // 退出编辑模式，不保存
+  await A.quickSetDate(o1.id, "deadline", "2026-09-01"); await sleep(400);
+  ok(st().orders.find(x => x.id === o1.id).values.deadline === "2026-09-01", "直接点选交期后立即生效，无需进编辑页/点保存");
+  window.go("detail", o1.id); await sleep(300);
+  ok(app().includes("2026年9月1日"), "页面上交期显示为新值");
 
   // 动态加工点：新增 -> 改名 -> 打卡
   await A.addSubPrompt(o1.id); await sleep(100);
@@ -256,14 +268,13 @@ async function apiAs(phone, method, p, body) {
   await A.saveInsp(o1.id); await sleep(500);
   ok(app().includes("UI测试-发现的新问题"), "业务员通过界面创建的验货问题显示出来");
   ok(app().includes("待整改"), "新建的问题整改情况显示「待整改」");
-  ok(app().includes("待整改（由") && app().includes("王建国"), "没权限时「待整改」标注了负责人是谁，不会让人误以为坏了");
-  ok(!app().includes('onclick="A.editInspFix'), "业务员看不到「填写整改」链接(无权限)");
+  ok(app().includes('onclick="A.editInspFix'), "权限统一后，业务员也能看到「填写整改」链接");
 
   A.forceLogout(); await sleep(150);
   doc.getElementById("lg-phone").value = "13855556666"; doc.getElementById("lg-pass").value = "123456"; // 王建国(follower, 负责o1)
   await A.login(); A.dismissWelcome(); await sleep(400);
   window.go("detail", o1.id); await sleep(400);
-  ok(!app().includes("＋ 新增") || !app().includes("三、验货问题</span><button"), "下厂员看不到验货「新增」入口");
+  ok(app().includes("＋ 新增") && app().includes("三、验货问题"), "权限统一后，下厂员也能看到验货「新增」入口");
   const newItem = st().orders.find(o => o.id === o1.id).inspections.flatMap(g => g.items).find(i => i.problem === "UI测试-发现的新问题");
   ok(!!newItem, "下厂员能看到业务员刚创建的问题");
   A.editInspFix(o1.id, st().orders.find(o => o.id === o1.id).inspections.find(g => g.items.some(i => i.id === newItem.id)).id, newItem.id);
