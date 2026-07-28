@@ -199,9 +199,11 @@ textarea.in{min-height:92px;resize:vertical;line-height:1.45}
 
 /* ---------- 打卡日志 ---------- */
 .logfield{border-bottom:.5px solid var(--line);padding:12px 16px}
-/* 生产进度：这是"主厂+加工点"这一组的分类标题，不是能点的字段，样式跟字段头做区分 */
-.prodgroup-title{padding:10px 16px;font-size:13px;font-weight:600;color:var(--ink-2);
-  background:var(--bg);border-top:.5px solid var(--line);border-bottom:.5px solid var(--line)}
+/* 生产进度：这是"主厂+加工点"这一组的分类标题，不是能点的字段，用高亮小标签跟字段头做区分 */
+.prodgroup-title{padding:10px 16px}
+.prodgroup-title span{display:inline-flex;align-items:center;background:var(--blue-2);color:#fff;
+  font-weight:700;font-size:13px;padding:4px 12px;border-radius:99px;
+  box-shadow:0 2px 8px color-mix(in srgb,var(--blue-2) 45%,transparent)}
 .logfield:last-child{border-bottom:0}
 .lf-head{display:flex;align-items:center;gap:8px;font-weight:600;font-size:15.5px}
 .lf-head .cnt{color:var(--ink-2);font-weight:400;font-size:13px}
