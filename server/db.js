@@ -192,6 +192,20 @@ function ensureDefaults() {
       console.log("[db] 已将「绣印工厂」拆分为「绣花工厂」「印花工厂」");
     }
   }
+  // 老库补齐「生产工序/车工人数/预计下车时间」这三个字段，挂在「服装工厂」旁边——
+  // 这三项以后是选服装工厂时一起填，不再是每次打卡都要填
+  if (fields && fields.order) {
+    const factoryIdx = fields.order.findIndex(f => f.k === "factory");
+    const hasMainProcess = fields.order.some(f => f.k === "mainProcess");
+    if (factoryIdx >= 0 && !hasMainProcess) {
+      fields.order.splice(factoryIdx + 1, 0,
+        { k: "mainProcess", label: "生产工序", type: "text" },
+        { k: "mainWorkers", label: "车工人数", type: "number" },
+        { k: "mainEstDone", label: "预计下车时间", type: "date" });
+      setSetting("fields", fields);
+      console.log("[db] 已在「服装工厂」旁边补齐「生产工序」「车工人数」「预计下车时间」字段");
+    }
+  }
   migrateOrdersSchema();
 }
 
@@ -289,6 +303,9 @@ function seedIfEmpty() {
       { k: "fabricProg", label: "面料进度", type: "log" },
       { k: "embProg", label: "绣印进度", type: "log" },
       { k: "factory", label: "服装工厂", type: "factory-prod" },
+      { k: "mainProcess", label: "生产工序", type: "text" },
+      { k: "mainWorkers", label: "车工人数", type: "number" },
+      { k: "mainEstDone", label: "预计下车时间", type: "date" },
       { k: "fabricFactory1", label: "面料工厂1", type: "factory-fabric" },
       { k: "fabricFactory2", label: "面料工厂2", type: "factory-fabric" },
       { k: "embFactory", label: "绣花工厂", type: "factory-emb" },

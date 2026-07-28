@@ -283,11 +283,20 @@ router.get("/orders/:id", (req, res) => {
   res.json(orderPublic(o));
 });
 
+// 服装工厂填了值的话，生产工序/车工人数/预计下车时间必须一并填(挂在服装工厂旁边，不再靠打卡时补)
+function requireMainFieldsIfFactorySet(v) {
+  if (!String((v || {}).factory || "").trim()) return null;
+  const proc = String((v || {}).mainProcess || "").trim(), wk = String((v || {}).mainWorkers || "").trim(), est = String((v || {}).mainEstDone || "").trim();
+  return (!proc || !wk || !est) ? "选择服装工厂时，请一并填写生产工序、车工人数、预计下车时间" : null;
+}
+
 router.post("/orders", (req, res) => {
   if (!canCreateOrder(req.user)) return res.status(403).json({ error: "只有业务员或管理员可以新建订单" });
   const { season, values } = req.body || {};
   const v = values || {};
   if (!v.styleNo && !v.styleName) return res.status(400).json({ error: "请至少填写货号或款式名" });
+  const factoryErr = requireMainFieldsIfFactorySet(v);
+  if (factoryErr) return res.status(400).json({ error: factoryErr });
   if (req.user.role === "sales" && !v.sales) v.sales = req.user.id;
   const id = uid(), now = Date.now();
   db.prepare("INSERT INTO orders(id,season,created_by,created_at,updated_at,data) VALUES(?,?,?,?,?,?)")
@@ -316,6 +325,13 @@ router.patch("/orders/:id", (req, res) => {
   if (!o) return res.status(404).json({ error: "订单不存在" });
   if (!A.canEditBasic(req.user, o)) return res.status(403).json({ error: "无权修改此订单的基本信息" });
   const { season, values } = req.body || {};
+  if (values && typeof values === "object" && values.factory !== undefined) {
+    const newFactory = String(values.factory || "").trim(), oldFactory = String((o.data.values || {}).factory || "").trim();
+    if (newFactory && newFactory !== oldFactory) {
+      const factoryErr = requireMainFieldsIfFactorySet(values);
+      if (factoryErr) return res.status(400).json({ error: factoryErr });
+    }
+  }
   if (season !== undefined && String(season).trim()) o.season = String(season).trim();
   if (values && typeof values === "object") o.data.values = Object.assign({}, o.data.values, values);
   saveOrder(o);
@@ -333,7 +349,7 @@ router.delete("/orders/:id", A.adminRequired, (req, res) => {
 router.post("/orders/:id/logs", (req, res) => {
   const o = loadOrder(req.params.id);
   if (!o) return res.status(404).json({ error: "订单不存在" });
-  const { key, text, process, workers, estDone } = req.body || {};
+  const { key, text } = req.body || {};
   const section = sectionOfKey(key);
   if (!A.canAddLog(req.user, o, section)) return res.status(403).json({ error: "你没有权限在此订单打卡" });
   const list = listForKey(o, key);
@@ -341,14 +357,10 @@ router.post("/orders/:id/logs", (req, res) => {
   const t = String(text || "").trim();
   const photos = cleanPhotos((req.body || {}).photos);
   const entry = { id: uid(), by: req.user.id, byName: req.user.name, t: Date.now(), text: t, photos };
-  // 主厂打卡：生产工序/车工人数/预计下车时间是必填项(每次打卡都要填，因为随时可能换工序)。
-  // 加工点(sub:*)打卡不再要求这三项——现在这三项挪到"添加加工点"时一次性填好，中途要改走"编辑加工点"，
-  // 打卡在加工点这边只是单纯的文字/照片进度记录，跟其它进度字段(面料进度/裁剪进度等)一样。
-  if (key === "mainLog") {
-    const proc = String(process || "").trim(), wk = String(workers || "").trim(), est = String(estDone || "").trim();
-    if (!proc || !wk || !est) return res.status(400).json({ error: "请填写生产工序、车工人数、预计下车时间" });
-    Object.assign(entry, { process: proc, workers: wk, estDone: est });
-  } else if (!t && !photos.length) return res.status(400).json({ error: "请填写打卡内容或添加照片" });
+  // 生产工序/车工人数/预计下车时间挪到订单的「服装工厂」旁边一次性填(见 PATCH /orders/:id)，
+  // 主厂(mainLog)和加工点(sub:*)打卡都不再要求这三项，只是单纯的文字/照片进度记录，
+  // 跟其它进度字段(面料进度/裁剪进度等)一样。
+  if (!t && !photos.length) return res.status(400).json({ error: "请填写打卡内容或添加照片" });
   list.push(entry);
   saveOrder(o);
   res.json(orderPublic(loadOrder(o.id)));
@@ -761,7 +773,11 @@ router.get("/export", A.adminRequired, (req, res) => {
   const header2 = ["季节", "货号", "环节", "生产工序", "车工人数", "预计下车时间", "内容", "记录人", "时间", "照片"];
   const rows2 = [];
   orders.forEach(o => {
-    (o.mainLog || []).forEach(e => rows2.push([o.season, styleOf(o), "主厂", e.process || "", e.workers || "", e.estDone || "", e.text || "", e.byName, timeText(e.t), photosText(e.photos)]));
+    // 主厂的工序/人数/预计下车时间现在挂在订单本身(服装工厂旁边一起填)，优先用它；
+    // 老数据里订单没有这三项时，退回旧的按条打卡记录里的值，导出报表不会突然空白
+    (o.mainLog || []).forEach(e => rows2.push([o.season, styleOf(o), "主厂",
+      o.values.mainProcess || e.process || "", o.values.mainWorkers || e.workers || "", o.values.mainEstDone || e.estDone || "",
+      e.text || "", e.byName, timeText(e.t), photosText(e.photos)]));
     // 加工点的工序/人数/预计下车时间现在挂在加工点本身(创建/编辑时填)，优先用它；
     // 老数据里加工点没有这三项时，退回旧的按条打卡记录里的值，导出报表不会突然空白
     (o.subs || []).forEach(s => (s.log || []).forEach(e =>

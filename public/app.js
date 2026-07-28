@@ -557,28 +557,16 @@ function importPreviewHtml() {
 }
 
 /* ---------- 订单详情 ---------- */
-// 一条打卡记录的展示（改/删链接 + 文字 + 照片），主厂/加工点/普通进度字段共用
+// 一条打卡记录的展示（改/删链接 + 文字 + 照片），主厂/加工点/普通进度字段共用。
+// 生产工序/车工人数/预计下车时间不在打卡记录里展示了，挪到服装工厂/加工点各自的信息区显示一次。
 function logEntriesHtml(list, oid, key) {
   const entries = (list || []).slice().sort((a, b) => b.t - a.t);
   if (!entries.length) return `<div class="empty" style="padding:8px 0">暂无打卡记录</div>`;
-  const isMainSub = key === "mainLog" || key.startsWith("sub:");
   return `<ul class="log">${entries.map(e => `<li>
     <div class="meta"><b>${esc(e.byName)}</b><span class="num">${fmtT(e.t)}</span>
       ${canTouchEntry(e) ? `<span class="act-row"><button type="button" class="act-btn" onclick="A.editLog('${oid}','${key}','${e.id}')">改</button>
       <button type="button" class="act-btn danger" onclick="A.delLog('${oid}','${key}','${e.id}')">删</button></span>` : ""}</div>
-    ${isMainSub && e.process ? `<div style="font-size:13px;color:var(--ink-2);margin-top:2px">
-      生产工序：${esc(e.process)} · 车工人数：${esc(e.workers)} · 预计下车：${esc(fmtDate(e.estDone))}</div>` : ""}
     ${e.text ? `<div class="txt">${esc(e.text)}</div>` : ""}${photoGallery(e.photos)}</li>`).join("")}</ul>`;
-}
-// 主厂/加工点打卡：生产工序/车工人数/预计下车时间是必填项（其它进度字段仍是纯文字打卡）
-function mainSubAddBoxHtml(oid, key, placeholder) {
-  return `<div class="addbox" id="add-${key}">
-    <label class="field"><span>生产工序</span><input class="in" id="proc-${key}" placeholder="例：车缝、锁边"></label>
-    <label class="field"><span>车工人数</span><input class="in" type="number" id="workers-${key}" placeholder="例：12"></label>
-    <label class="field"><span>预计下车时间</span>${dateFieldHtml("est-" + key, "")}</label>
-    <textarea class="in" id="txt-${key}" placeholder="${esc(placeholder)}" style="margin-top:8px"></textarea>
-    ${photoPicker("log:" + key)}
-    <div style="margin-top:8px"><button class="btn mini" onclick="A.addLog('${oid}','${key}')">提交打卡</button></div></div>`;
 }
 function logFieldHtml(o, f, list, addKey, canAdd) {
   return `<div class="logfield">
@@ -635,21 +623,23 @@ function vDetail() {
   const logsOf = s => state.fields[s].filter(f => f.type === "log");
   const canB = canEditBasic(o), canOrdLog = canAddLog(o, "order"), canProdLog = canAddLog(o, "production");
   const canInsp = canWriteInspProblem(), canFix = canWriteInspFix(o);
-  // 日期字段(订单交期/发货日期等)：有编辑权限时直接在详情页点选就改，不用进编辑页
-  const kv = fs => fs.map(f => f.type === "date" && canB
+  // 订单交期/发货日期这两个字段单独摘出来，有编辑权限时直接在详情页点选就改，不用进编辑页；
+  // 其它日期类字段(比如预计下车时间)是普通字段，跟着所属的分组(服装工厂旁边)走正常编辑流程
+  const isQuickDateField = f => f.k === "deadline" || f.k === "shipDate";
+  const kv = fs => fs.map(f => isQuickDateField(f) && canB
     ? `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
         <div class="row-value">${dateFieldHtml("qd-" + o.id + "-" + f.k, o.values[f.k], `A.quickSetDate('${o.id}','${f.k}',this.value)`)}</div></div>`
     : `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
         <div class="row-value">${esc(displayVal(o, f)) || "—"}</div></div>`).join("");
-  // 日期字段已经能在详情页直接点选修改，编辑表单里不再重复出现
-  const editForm = s => `<div class="grid2">${scalars(s).filter(f => f.type !== "date").map(f => fieldRow(f, o.values[f.k] || "")).join("")}</div>`;
+  // 订单交期/发货日期已经能在详情页直接点选修改，编辑表单里不再重复出现
+  const editForm = s => `<div class="grid2">${scalars(s).filter(f => !isQuickDateField(f)).map(f => fieldRow(f, o.values[f.k] || "")).join("")}</div>`;
   const photos = normalizePhotos(o.values.img);
   const headerThumb = photos.length ? `<img src="${esc(photos[0])}" alt="款式图" class="header-thumb"
     data-gallery='${JSON.stringify(photos)}' data-i="0" onclick="A.lightboxFromEl(this)">` : "";
-  const dateFieldsProd = scalars("production").filter(f => f.type === "date");
-  const topProdScalars = scalars("production").filter(f => f.type !== "date");
-  const orderKvFields = scalars("order").filter(f => f.type !== "image" && f.type !== "date");
-  const dateFieldsOrder = scalars("order").filter(f => f.type === "date");
+  const dateFieldsProd = scalars("production").filter(isQuickDateField);
+  const topProdScalars = scalars("production").filter(f => !isQuickDateField(f));
+  const orderKvFields = scalars("order").filter(f => f.type !== "image" && !isQuickDateField(f));
+  const dateFieldsOrder = scalars("order").filter(isQuickDateField);
 
   return `<section class="group">
     <div class="card"><div class="card-pad" style="display:flex;align-items:center;gap:14px">
@@ -684,7 +674,10 @@ function vDetail() {
           <div class="lf-head" style="font-size:14.5px"><span>本厂</span>
             <span class="tag role">${esc(o.values.factory) || "未指定"}</span>
             ${canProdLog ? `<button class="btn mini right" onclick="A.toggleAdd('mainLog')">＋ 打卡</button>` : ""}</div>
-          ${canProdLog ? mainSubAddBoxHtml(o.id, "mainLog", "本厂生产进度（补充说明，选填）…") : ""}
+          ${canProdLog ? `<div class="addbox" id="add-mainLog">
+            <textarea class="in" id="txt-mainLog" placeholder="本厂生产进度（可写文字/传照片）…"></textarea>
+            ${photoPicker("log:mainLog")}
+            <div style="margin-top:8px"><button class="btn mini" onclick="A.addLog('${o.id}','mainLog')">提交打卡</button></div></div>` : ""}
           ${logEntriesHtml(o.mainLog, o.id, "mainLog")}</div>
         ${(o.subs || []).map(s => subCardHtml(o, s, canProdLog)).join("")}
         ${canProdLog ? `<div style="margin-top:10px;border-top:.5px solid var(--line);padding-top:10px">
@@ -1169,14 +1162,8 @@ const A = {
   async addLog(oid, key) {
     const el = $("txt-" + key), text = ((el && el.value) || "").trim();
     const photos = photoDraft["log:" + key] || [];
-    const isMainSub = key === "mainLog";
+    if (!text && !photos.length) return toast("请填写打卡内容或加照片");
     const body = { key, text, photos };
-    if (isMainSub) {
-      const process = ($("proc-" + key) || {}).value || "", workers = ($("workers-" + key) || {}).value || "";
-      const estDone = ($("est-" + key) || {}).value || "";
-      if (!process.trim() || !workers.trim() || !estDone) return toast("请填写生产工序、车工人数、预计下车时间");
-      Object.assign(body, { process: process.trim(), workers: workers.trim(), estDone });
-    } else if (!text && !photos.length) return toast("请填写打卡内容或加照片");
     await run(() => api("POST", `/orders/${oid}/logs`, body).then(() => { delete photoDraft["log:" + key]; }), "打卡成功");
   },
   editLog(oid, key, eid) {
