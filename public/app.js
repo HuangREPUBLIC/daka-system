@@ -649,7 +649,7 @@ function vDetail() {
     ? `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
         <div class="row-value">${dateFieldHtml("qd-" + o.id + "-" + f.k, o.values[f.k], `A.quickSetDate('${o.id}','${f.k}',this.value)`)}</div></div>`
     : `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div>${f.k === "factory" ? mainFieldsLine : ""}</div>
-        <div class="row-value">${f.k === "factory" && o.values.factory ? `<span class="tag hl">${esc(o.values.factory)}</span>` : (esc(displayVal(o, f)) || "—")}</div></div>`).join("");
+        <div class="row-value">${esc(displayVal(o, f)) || "—"}</div></div>`).join("");
   // 订单交期/发货日期已经能在详情页直接点选修改，编辑表单里不再重复出现
   const editForm = s => {
     const fs = scalars(s).filter(f => !isQuickDateField(f));
