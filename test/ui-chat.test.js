@@ -199,6 +199,13 @@ async function apiAs(phone, method, p, body) {
   ok(doc.getElementById("nf-deadline--label").textContent === todayCn, "新建订单日期默认当天且显示中文");
   ok(doc.getElementById("nf-deadline").value === todayIso, "底层日期值就是本地当天（不受 UTC 时差影响）");
   ok(doc.getElementById("nf-shipDate--label").textContent === todayCn, "发货日期同样默认当天");
+  // 服装工厂：选完才展开生产工序/车工人数/预计下车时间，没选先收起来
+  const factorySelNew = doc.getElementById("nf-factory");
+  const wrapNew = factorySelNew.closest("label.field").nextElementSibling;
+  ok(wrapNew.classList.contains("mainfields-wrap") && wrapNew.style.display === "none", "新建订单时没选服装工厂，生产工序等三项先收起来");
+  factorySelNew.value = [...factorySelNew.options].find(o => o.value).value;
+  factorySelNew.dispatchEvent(new window.Event("change"));
+  ok(wrapNew.style.display === "contents", "新建订单选好服装工厂后，生产工序等三项展开显示");
   ok(!!doc.getElementById("pe-img") && app().includes("拍照") && app().includes("相册"), "款式图是多图相册选择器，且拍照/相册是两个独立入口(不受 multiple 属性影响拍照选项)");
   ok(doc.querySelector("#imp-file--name") && doc.querySelector("#imp-file--name").textContent.includes("未选择文件"), "CSV 文件控件仍显示中文");
   ok(!/Choose File|No file chosen/i.test(app()), "没有英文文件选择文案");
@@ -246,6 +253,10 @@ async function apiAs(phone, method, p, body) {
   ok(!!doc.getElementById(`qd-${o1.id}-shipDate`) && doc.getElementById(`qd-${o1.id}-shipDate`).type === "date", "发货日期在详情页直接可点选(不用进编辑页)");
   A.toggleBasic(); await sleep(150);
   ok(!app().includes('id="nf-deadline"') && !app().includes('id="nf-shipDate"'), "编辑表单里不再重复出现订单交期/发货日期");
+  const factorySelEdit = doc.getElementById("nf-factory");
+  const wrapEdit = factorySelEdit.closest("label.field").nextElementSibling;
+  ok(wrapEdit.classList.contains("mainfields-wrap") && wrapEdit.style.display === "contents",
+    "编辑订单时，已有服装工厂值的订单一进编辑模式生产工序等三项就是展开状态");
   ok(!!doc.getElementById(`qd-${o1.id}-deadline`) && !!doc.getElementById(`qd-${o1.id}-shipDate`), "编辑模式下日期字段仍在详情页可直接点选");
   A.toggleBasic(); await sleep(150); // 退出编辑模式，不保存
   await A.quickSetDate(o1.id, "deadline", "2026-09-01"); await sleep(400);

@@ -165,7 +165,7 @@ function displayVal(o, f) {
   return v;
 }
 const isMultiFactory = f => f.type === "factory-fabric" || f.type === "factory-emb";
-function fieldInput(f, val, prefix) {
+function fieldInput(f, val, prefix, extraAttrs) {
   prefix = prefix || "nf-";
   const id = prefix + f.k;
   if (isMultiFactory(f)) return factoryMultiHtml(f, val, id);
@@ -174,7 +174,7 @@ function fieldInput(f, val, prefix) {
     // 工厂类下拉：就算这个值不在管理员定义的列表里(比如导入进来的)，也要保留显示出来，不能悄悄丢掉
     const isFactory = f.type === "factory-prod";
     const extra = (isFactory && val && !opts.some(([v]) => v === val)) ? [[val, val]] : [];
-    return `<select class="in" id="${id}"><option value="">请选择</option>${[...extra, ...opts].map(([v, t]) =>
+    return `<select class="in" id="${id}" ${extraAttrs || ""}><option value="">请选择</option>${[...extra, ...opts].map(([v, t]) =>
       `<option value="${esc(v)}" ${v === val ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>`;
   }
   if (f.type === "textarea") return `<textarea class="in" id="${id}">${esc(val || "")}</textarea>`;
@@ -183,7 +183,22 @@ function fieldInput(f, val, prefix) {
   if (f.type === "image") return photoPicker("img");
   return `<input class="in" id="${id}" value="${esc(val || "")}">`;
 }
-const fieldRow = (f, val, prefix) => `<label class="field"><span>${esc(f.label)}</span>${fieldInput(f, val, prefix)}</label>`;
+const fieldRow = (f, val, prefix, extraAttrs) => `<label class="field"><span>${esc(f.label)}</span>${fieldInput(f, val, prefix, extraAttrs)}</label>`;
+// 服装工厂 + 生产工序/车工人数/预计下车时间 一组渲染：选完服装工厂才展开显示后三项(不选就先收起来)，
+// "新建订单"和"编辑订单"两处都用这个，valOf(k) 取当前值(新建时是默认值，编辑时是订单已有值)
+function factoryGroupFieldsHtml(fs, valOf, prefix) {
+  const mainKeys = ["mainProcess", "mainWorkers", "mainEstDone"];
+  return fs.filter(f => !mainKeys.includes(f.k)).map(f => {
+    if (f.k !== "factory") return fieldRow(f, valOf(f.k), prefix);
+    const hasFactory = !!String(valOf("factory") || "").trim();
+    const mainFieldsHtml = mainKeys.map(k => {
+      const mf = fs.find(x => x.k === k) || state.fields.order.find(x => x.k === k);
+      return mf ? fieldRow(mf, valOf(k), prefix) : "";
+    }).join("");
+    return fieldRow(f, valOf("factory"), prefix, 'onchange="A.toggleMainFields(this)"') +
+      `<div class="mainfields-wrap" style="display:${hasFactory ? "contents" : "none"}">${mainFieldsHtml}</div>`;
+  }).join("");
+}
 
 // 面料工厂/绣印工厂：同一款可能要挂多个供应商，用标签+下拉添加，而不是单选
 function factoryMultiHtml(f, val, id) {
@@ -513,11 +528,12 @@ function vNew() {
   // 新建时日期默认当天，业务员默认自己
   const defVal = f => f.type === "date" ? todayStr()
     : (f.k === "sales" && me().template === "sales" ? me().id : "");
+  const orderFields = scalars("order");
   return `<section class="group">
     <div class="group-title">订单明细</div>
     <div class="card">
       <label class="field"><span>订单季节</span>${seasonSelectHtml("")}</label>
-      <div class="grid2">${scalars("order").map(f => fieldRow(f, defVal(f))).join("")}</div>
+      <div class="grid2">${factoryGroupFieldsHtml(orderFields, k => defVal(orderFields.find(x => x.k === k) || {}))}</div>
     </div></section>
   <section class="group">
     <div class="group-title">生产安排（指定负责打卡的下厂员）</div>
@@ -635,7 +651,12 @@ function vDetail() {
     : `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div>${f.k === "factory" ? mainFieldsLine : ""}</div>
         <div class="row-value">${esc(displayVal(o, f)) || "—"}</div></div>`).join("");
   // 订单交期/发货日期已经能在详情页直接点选修改，编辑表单里不再重复出现
-  const editForm = s => `<div class="grid2">${scalars(s).filter(f => !isQuickDateField(f)).map(f => fieldRow(f, o.values[f.k] || "")).join("")}</div>`;
+  const editForm = s => {
+    const fs = scalars(s).filter(f => !isQuickDateField(f));
+    const inner = s === "order" ? factoryGroupFieldsHtml(fs, k => o.values[k] || "")
+      : fs.map(f => fieldRow(f, o.values[f.k] || "")).join("");
+    return `<div class="grid2">${inner}</div>`;
+  };
   const photos = normalizePhotos(o.values.img);
   const headerThumb = photos.length ? `<img src="${esc(photos[0])}" alt="款式图" class="header-thumb"
     data-gallery='${JSON.stringify(photos)}' data-i="0" onclick="A.lightboxFromEl(this)">` : "";
@@ -1163,6 +1184,12 @@ const A = {
   },
 
   toggleAdd(key) { const b = $("add-" + key); if (b) b.classList.toggle("show"); },
+  // 服装工厂选好了才展开显示生产工序/车工人数/预计下车时间，没选就先收起来
+  toggleMainFields(el) {
+    const label = el.closest("label.field");
+    const wrap = label && label.nextElementSibling;
+    if (wrap && wrap.classList.contains("mainfields-wrap")) wrap.style.display = el.value ? "contents" : "none";
+  },
   async addLog(oid, key) {
     const el = $("txt-" + key), text = ((el && el.value) || "").trim();
     const photos = photoDraft["log:" + key] || [];
