@@ -276,11 +276,15 @@ function photoThumbs(urls, editable, ctx) {
     <img src="${esc(u)}" data-gallery='${JSON.stringify(urls)}' data-i="${i}" onclick="A.lightboxFromEl(this)">
     ${editable ? `<span class="ph-x" onclick="A.removeDraftPhoto('${ctx}',${i})">✕</span>` : ""}</div>`).join("");
 }
+// 拍照和相册拆成两个独立入口：部分手机(尤其华为)系统选择器在 <input multiple> 上会隐藏"拍照"选项
+// (一次拍照只能出一张图，跟多选语义冲突)，只拆开两个按钮才能保证两条路都能用
 function pickerInner(ctx) {
   const list = photoDraft[ctx] || [];
   return photoThumbs(list, true, ctx) +
+    `<label class="ph-add"><input type="file" accept="image/*" capture="environment" style="display:none" onchange="A.addDraftPhotos('${ctx}',this)">
+      <span class="ph-plus">📷</span><span>拍照</span></label>` +
     `<label class="ph-add"><input type="file" accept="image/*" multiple style="display:none" onchange="A.addDraftPhotos('${ctx}',this)">
-      <span class="ph-plus">＋</span><span>添加</span></label>`;
+      <span class="ph-plus">＋</span><span>相册</span></label>`;
 }
 function photoPicker(ctx) { return `<div class="photos-grid" id="pe-${ctx}">${pickerInner(ctx)}</div>`; }
 function photoGallery(urls) {
