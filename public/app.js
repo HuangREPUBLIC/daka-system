@@ -626,10 +626,13 @@ function vDetail() {
   // 订单交期/发货日期这两个字段单独摘出来，有编辑权限时直接在详情页点选就改，不用进编辑页；
   // 其它日期类字段(比如预计下车时间)是普通字段，跟着所属的分组(服装工厂旁边)走正常编辑流程
   const isQuickDateField = f => f.k === "deadline" || f.k === "shipDate";
+  // 生产工序/车工人数/预计下车时间不单独列成行，跟服装工厂绑在一起，用一行小字带出(模仿加工点卡片的样式)
+  const mainFieldsLine = o.values.mainProcess ? `<div style="font-size:12.5px;color:var(--ink-2);margin-top:2px">
+      生产工序：${esc(o.values.mainProcess)} · 车工人数：${esc(o.values.mainWorkers)} · 预计下车：${esc(fmtDate(o.values.mainEstDone))}</div>` : "";
   const kv = fs => fs.map(f => isQuickDateField(f) && canB
     ? `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
         <div class="row-value">${dateFieldHtml("qd-" + o.id + "-" + f.k, o.values[f.k], `A.quickSetDate('${o.id}','${f.k}',this.value)`)}</div></div>`
-    : `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
+    : `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div>${f.k === "factory" ? mainFieldsLine : ""}</div>
         <div class="row-value">${esc(displayVal(o, f)) || "—"}</div></div>`).join("");
   // 订单交期/发货日期已经能在详情页直接点选修改，编辑表单里不再重复出现
   const editForm = s => `<div class="grid2">${scalars(s).filter(f => !isQuickDateField(f)).map(f => fieldRow(f, o.values[f.k] || "")).join("")}</div>`;
@@ -638,7 +641,8 @@ function vDetail() {
     data-gallery='${JSON.stringify(photos)}' data-i="0" onclick="A.lightboxFromEl(this)">` : "";
   const dateFieldsProd = scalars("production").filter(isQuickDateField);
   const topProdScalars = scalars("production").filter(f => !isQuickDateField(f));
-  const orderKvFields = scalars("order").filter(f => f.type !== "image" && !isQuickDateField(f));
+  const mainFieldKeys = ["mainProcess", "mainWorkers", "mainEstDone"];
+  const orderKvFields = scalars("order").filter(f => f.type !== "image" && !isQuickDateField(f) && !mainFieldKeys.includes(f.k));
   const dateFieldsOrder = scalars("order").filter(isQuickDateField);
 
   return `<section class="group">
