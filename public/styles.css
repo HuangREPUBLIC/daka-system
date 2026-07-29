@@ -9,7 +9,7 @@
   --ease-out:cubic-bezier(0.23,1,0.32,1);
   --ease-drawer:cubic-bezier(0.32,0.72,0,1);
   /* 品牌色：韩航蓝 */
-  --blue:#123B6D; --blue-2:#1E5FA8; --sky:#7AB2DD; --sky-soft:#E9F3FB; --magenta:#AD1457;
+  --blue:#123B6D; --blue-2:#1E5FA8; --sky:#7AB2DD; --sky-soft:#E9F3FB; --magenta:#EC008C;
   /* iOS 系统灰阶 */
   --bg:#F2F2F7; --card:#FFFFFF; --card-2:#FFFFFF;
   --ink:#000000; --ink-2:#8A8A8E; --ink-3:#C7C7CC;
@@ -22,7 +22,7 @@
 }
 @media (prefers-color-scheme: dark){
   :root{
-    --blue:#5B9BD8; --blue-2:#6EA8DF; --sky:#7AB2DD; --sky-soft:#16283D; --magenta:#EC407A;
+    --blue:#5B9BD8; --blue-2:#6EA8DF; --sky:#7AB2DD; --sky-soft:#16283D; --magenta:#EC008C;
     --bg:#000000; --card:#1C1C1E; --card-2:#2C2C2E;
     --ink:#FFFFFF; --ink-2:#8E8E93; --ink-3:#48484A;
     --line:#38383A; --line-2:#48484A;
@@ -32,7 +32,7 @@
   }
 }
 :root[data-theme="light"]{
-  --blue:#123B6D; --blue-2:#1E5FA8; --sky:#7AB2DD; --sky-soft:#E9F3FB; --magenta:#AD1457;
+  --blue:#123B6D; --blue-2:#1E5FA8; --sky:#7AB2DD; --sky-soft:#E9F3FB; --magenta:#EC008C;
   --bg:#F2F2F7; --card:#FFFFFF; --card-2:#FFFFFF;
   --ink:#000000; --ink-2:#8A8A8E; --ink-3:#C7C7CC;
   --line:#E5E5EA; --line-2:#D1D1D6;
@@ -40,7 +40,7 @@
   --nav-bg:rgba(255,255,255,.82); --shadow:0 1px 2px rgba(0,0,0,.04);
 }
 :root[data-theme="dark"]{
-  --blue:#5B9BD8; --blue-2:#6EA8DF; --sky:#7AB2DD; --sky-soft:#16283D;
+  --blue:#5B9BD8; --blue-2:#6EA8DF; --sky:#7AB2DD; --sky-soft:#16283D; --magenta:#EC008C;
   --bg:#000000; --card:#1C1C1E; --card-2:#2C2C2E;
   --ink:#FFFFFF; --ink-2:#8E8E93; --ink-3:#48484A;
   --line:#38383A; --line-2:#48484A;
@@ -203,8 +203,7 @@ textarea.in{min-height:92px;resize:vertical;line-height:1.45}
 /* 生产进度：这是"主厂+加工点"这一组的分类标题，不是能点的字段，用高亮小标签跟字段头做区分 */
 .prodgroup-title{padding:10px 16px}
 .prodgroup-title span{display:inline-flex;align-items:center;background:var(--blue-2);color:#fff;
-  font-weight:700;font-size:13px;padding:4px 12px;border-radius:99px;
-  box-shadow:0 2px 8px color-mix(in srgb,var(--blue-2) 45%,transparent)}
+  font-weight:700;font-size:13px;padding:4px 12px;border-radius:99px}
 .logfield:last-child{border-bottom:0}
 .lf-head{display:flex;align-items:center;gap:8px;font-weight:600;font-size:15.5px}
 .lf-head .cnt{color:var(--ink-2);font-weight:400;font-size:13px}
@@ -417,7 +416,6 @@ table.tbl{border-collapse:collapse;width:100%;font-size:15px;min-width:460px}
   background:var(--magenta);color:#fff;
   font-weight:700;font-size:14.5px;
   padding:5px 14px;border-radius:99px;
-  box-shadow:0 3px 10px color-mix(in srgb,var(--magenta) 50%,transparent);
 }
 
 /* ---- 详情页头部款式图缩略 ---- */
