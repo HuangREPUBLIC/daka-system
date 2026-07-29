@@ -549,6 +549,7 @@ function importPreviewHtml() {
       <div class="imp-head">第 ${i + 1} 单${importPreview.length > 1 ?
         `<button class="btn plain right" style="color:var(--bad)" onclick="A.removeImportRow(${i})">移除</button>` : ""}</div>
       <label class="field"><span>订单季节</span>${seasonSelectHtml(r.season, "imp" + i + "-")}</label>
+      <label class="field"><span>款式图</span>${photoPicker("imp" + i + "-img")}</label>
       <div class="grid2">${orderScalars.map(f => fieldRow(f, r.values[f.k] || "", "imp" + i + "-")).join("")}</div>
       <div class="grid2">${prodScalars.map(f => fieldRow(f, r.values[f.k] || "", "imp" + i + "-")).join("")}</div>
     </div>`).join("")}
@@ -1439,7 +1440,8 @@ const A = {
         method: "POST", headers: { Authorization: "Bearer " + state.token }, body: fd });
       const j = await r.json(); if (!r.ok) throw j;
       importRaw = "";
-      A.showPreview(A.rowsToPreview(j.rows), j.encoding === "GBK" ? "（已按 GBK 编码读取）" : "");
+      const gotImages = j.rowImages && Object.keys(j.rowImages).length;
+      A.showPreview(A.rowsToPreview(j.rows, j.rowImages), (j.encoding === "GBK" ? "（已按 GBK 编码读取）" : "") + (gotImages ? "，已自动识别表格里的款式图" : ""));
     } catch (e) { toast((e && e.error) || "文件解析失败"); }
   },
   // 表头列名 -> 字段
@@ -1452,7 +1454,7 @@ const A = {
       "绣花工厂": "embFactory", "印花工厂": "printFactory", "绣印工厂": "embFactory" }; // 绣印工厂 是旧表头，兼容老导入模板
   },
   // 二维数组（首行表头）-> 待确认的订单列表
-  rowsToPreview(grid) {
+  rowsToPreview(grid, rowImages) {
     const MAP = A.importMap();
     // 找表头行：前 10 行里第一行"含已知列名"的行（容忍标题行/空行在上面）
     let hi = 0;
@@ -1482,14 +1484,20 @@ const A = {
       });
       if (!values.styleNo && !values.styleName) continue;
       if (me().template === "sales" && !values.sales) values.sales = me().id;
+      if (rowImages && rowImages[i]) values.img = [rowImages[i]]; // WPS/Excel 表格里嵌入的款式图，按行号配对带出来
       out.push({ season: season || "", values });
     }
     return out;
   },
   showPreview(rows, extra) {
     if (!rows.length) return toast("未识别到有效数据，请检查表头列名");
-    importPreview = rows; render();
+    importPreview = rows; A.resyncImportPhotoDrafts(); render();
     toast(`识别到 ${rows.length} 单${extra || ""}，已填入下方表单，可修改后确认导入`);
+  },
+  // 导入预览里每行的款式图草稿：按 importPreview 当前的下标重建，避免"移除某一行"后下标错位串图
+  resyncImportPhotoDrafts() {
+    Object.keys(photoDraft).forEach(k => { if (/^imp\d+-img$/.test(k)) delete photoDraft[k]; });
+    (importPreview || []).forEach((r, i) => { photoDraft["imp" + i + "-img"] = normalizePhotos(r.values.img); });
   },
   importText() {
     const raw = ($("imp-text").value || "").trim();
@@ -1517,6 +1525,8 @@ const A = {
     const scal = importScalars();
     importPreview.forEach((r, i) => {
       const se = $("imp" + i + "-season"); if (se) r.season = se.value || "";
+      const img = photoDraft["imp" + i + "-img"];
+      if (img && img.length) r.values.img = img.slice(); else delete r.values.img;
       scal.forEach(f => {
         const el = $("imp" + i + "-" + f.k); if (!el) return;
         if (isMultiFactory(f)) {
@@ -1531,9 +1541,14 @@ const A = {
   removeImportRow(i) {
     A.syncImportInputs(); if (!importPreview) return;
     importPreview.splice(i, 1); if (!importPreview.length) importPreview = null;
+    A.resyncImportPhotoDrafts();
     render();
   },
-  cancelImport() { importPreview = null; render(); toast("已取消，未导入任何数据"); },
+  cancelImport() {
+    importPreview = null;
+    Object.keys(photoDraft).forEach(k => { if (/^imp\d+-img$/.test(k)) delete photoDraft[k]; });
+    render(); toast("已取消，未导入任何数据");
+  },
   async confirmImport() {
     if (!importPreview || !importPreview.length) return;
     A.syncImportInputs();
@@ -1543,6 +1558,7 @@ const A = {
     try {
       const r = await api("POST", "/orders/import", { orders: built });
       importPreview = null; importRaw = "";
+      Object.keys(photoDraft).forEach(k => { if (/^imp\d+-img$/.test(k)) delete photoDraft[k]; });
       await refresh(); go("orders"); toast(`成功导入 ${r.imported} 个订单`);
     } catch (e) { toast((e && e.error) || "导入失败"); }
   }
