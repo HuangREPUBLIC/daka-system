@@ -165,7 +165,7 @@ function displayVal(o, f) {
   return v;
 }
 const isMultiFactory = f => f.type === "factory-fabric" || f.type === "factory-emb";
-function fieldInput(f, val, prefix, extraAttrs) {
+function fieldInput(f, val, prefix) {
   prefix = prefix || "nf-";
   const id = prefix + f.k;
   if (isMultiFactory(f)) return factoryMultiHtml(f, val, id);
@@ -174,7 +174,7 @@ function fieldInput(f, val, prefix, extraAttrs) {
     // 工厂类下拉：就算这个值不在管理员定义的列表里(比如导入进来的)，也要保留显示出来，不能悄悄丢掉
     const isFactory = f.type === "factory-prod";
     const extra = (isFactory && val && !opts.some(([v]) => v === val)) ? [[val, val]] : [];
-    return `<select class="in" id="${id}" ${extraAttrs || ""}><option value="">请选择</option>${[...extra, ...opts].map(([v, t]) =>
+    return `<select class="in" id="${id}"><option value="">请选择</option>${[...extra, ...opts].map(([v, t]) =>
       `<option value="${esc(v)}" ${v === val ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>`;
   }
   if (f.type === "textarea") return `<textarea class="in" id="${id}">${esc(val || "")}</textarea>`;
@@ -183,22 +183,7 @@ function fieldInput(f, val, prefix, extraAttrs) {
   if (f.type === "image") return photoPicker("img");
   return `<input class="in" id="${id}" value="${esc(val || "")}">`;
 }
-const fieldRow = (f, val, prefix, extraAttrs) => `<label class="field"><span>${esc(f.label)}</span>${fieldInput(f, val, prefix, extraAttrs)}</label>`;
-// 服装工厂 + 生产工序/车工人数/预计下车时间 一组渲染：选完服装工厂才展开显示后三项(不选就先收起来)，
-// "新建订单"和"编辑订单"两处都用这个，valOf(k) 取当前值(新建时是默认值，编辑时是订单已有值)
-function factoryGroupFieldsHtml(fs, valOf, prefix) {
-  const mainKeys = ["mainProcess", "mainWorkers", "mainEstDone"];
-  return fs.filter(f => !mainKeys.includes(f.k)).map(f => {
-    if (f.k !== "factory") return fieldRow(f, valOf(f.k), prefix);
-    const hasFactory = !!String(valOf("factory") || "").trim();
-    const mainFieldsHtml = mainKeys.map(k => {
-      const mf = fs.find(x => x.k === k) || state.fields.order.find(x => x.k === k);
-      return mf ? fieldRow(mf, valOf(k), prefix) : "";
-    }).join("");
-    return fieldRow(f, valOf("factory"), prefix, 'onchange="A.toggleMainFields(this)"') +
-      `<div class="mainfields-wrap" style="display:${hasFactory ? "contents" : "none"}">${mainFieldsHtml}</div>`;
-  }).join("");
-}
+const fieldRow = (f, val, prefix) => `<label class="field"><span>${esc(f.label)}</span>${fieldInput(f, val, prefix)}</label>`;
 
 // 面料工厂/绣印工厂：同一款可能要挂多个供应商，用标签+下拉添加，而不是单选
 function factoryMultiHtml(f, val, id) {
@@ -529,12 +514,11 @@ function vNew() {
   // 新建时日期默认当天，业务员默认自己
   const defVal = f => f.type === "date" ? todayStr()
     : (f.k === "sales" && me().template === "sales" ? me().id : "");
-  const orderFields = scalars("order");
   return `<section class="group">
     <div class="group-title">订单明细</div>
     <div class="card">
       <label class="field"><span>订单季节</span>${seasonSelectHtml("")}</label>
-      <div class="grid2">${factoryGroupFieldsHtml(orderFields, k => defVal(orderFields.find(x => x.k === k) || {}))}</div>
+      <div class="grid2">${scalars("order").map(f => fieldRow(f, defVal(f))).join("")}</div>
     </div></section>
   <section class="group">
     <div class="group-title">生产安排（指定负责打卡的下厂员）</div>
@@ -583,6 +567,8 @@ function logEntriesHtml(list, oid, key) {
     <div class="meta"><b>${esc(e.byName)}</b><span class="num">${fmtT(e.t)}</span>
       ${canTouchEntry(e) ? `<span class="act-row"><button type="button" class="act-btn" onclick="A.editLog('${oid}','${key}','${e.id}')">改</button>
       <button type="button" class="act-btn danger" onclick="A.delLog('${oid}','${key}','${e.id}')">删</button></span>` : ""}</div>
+    ${key === "mainLog" && e.process ? `<div style="font-size:13px;color:var(--ink-2);margin-top:2px">
+      生产工序：${esc(e.process)} · 车工人数：${esc(e.workers)} · 预计下车：${esc(fmtDate(e.estDone))}</div>` : ""}
     ${e.text ? `<div class="txt">${esc(e.text)}</div>` : ""}${photoGallery(e.photos)}</li>`).join("")}</ul>`;
 }
 function logFieldHtml(o, f, list, addKey, canAdd) {
@@ -643,28 +629,19 @@ function vDetail() {
   // 订单交期/发货日期这两个字段单独摘出来，有编辑权限时直接在详情页点选就改，不用进编辑页；
   // 其它日期类字段(比如预计下车时间)是普通字段，跟着所属的分组(服装工厂旁边)走正常编辑流程
   const isQuickDateField = f => f.k === "deadline" || f.k === "shipDate";
-  // 生产工序/车工人数/预计下车时间不单独列成行，跟服装工厂绑在一起，用一行小字带出(模仿加工点卡片的样式)
-  const mainFieldsLine = o.values.mainProcess ? `<div style="font-size:12.5px;color:var(--ink-2);margin-top:2px">
-      生产工序：${esc(o.values.mainProcess)} · 车工人数：${esc(o.values.mainWorkers)} · 预计下车：${esc(fmtDate(o.values.mainEstDone))}</div>` : "";
   const kv = fs => fs.map(f => isQuickDateField(f) && canB
     ? `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
         <div class="row-value">${dateFieldHtml("qd-" + o.id + "-" + f.k, o.values[f.k], `A.quickSetDate('${o.id}','${f.k}',this.value)`)}</div></div>`
-    : `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div>${f.k === "factory" ? mainFieldsLine : ""}</div>
+    : `<div class="row-item"><div class="row-main"><div class="row-label">${esc(f.label)}</div></div>
         <div class="row-value">${esc(displayVal(o, f)) || "—"}</div></div>`).join("");
   // 订单交期/发货日期已经能在详情页直接点选修改，编辑表单里不再重复出现
-  const editForm = s => {
-    const fs = scalars(s).filter(f => !isQuickDateField(f));
-    const inner = s === "order" ? factoryGroupFieldsHtml(fs, k => o.values[k] || "")
-      : fs.map(f => fieldRow(f, o.values[f.k] || "")).join("");
-    return `<div class="grid2">${inner}</div>`;
-  };
+  const editForm = s => `<div class="grid2">${scalars(s).filter(f => !isQuickDateField(f)).map(f => fieldRow(f, o.values[f.k] || "")).join("")}</div>`;
   const photos = normalizePhotos(o.values.img);
   const headerThumb = photos.length ? `<img src="${esc(photos[0])}" alt="款式图" class="header-thumb"
     data-gallery='${JSON.stringify(photos)}' data-i="0" onclick="A.lightboxFromEl(this)">` : "";
   const dateFieldsProd = scalars("production").filter(isQuickDateField);
   const topProdScalars = scalars("production").filter(f => !isQuickDateField(f));
-  const mainFieldKeys = ["mainProcess", "mainWorkers", "mainEstDone"];
-  const orderKvFields = scalars("order").filter(f => f.type !== "image" && !isQuickDateField(f) && !mainFieldKeys.includes(f.k));
+  const orderKvFields = scalars("order").filter(f => f.type !== "image" && !isQuickDateField(f));
   const dateFieldsOrder = scalars("order").filter(isQuickDateField);
 
   return `<section class="group">
@@ -700,9 +677,11 @@ function vDetail() {
           <div class="lf-head" style="font-size:14.5px"><span>本厂</span>
             <span class="tag hl">${esc(o.values.factory) || "未指定"}</span>
             ${canProdLog ? `<button class="btn mini right" onclick="A.toggleAdd('mainLog')">＋ 打卡</button>` : ""}</div>
-          ${mainFieldsLine}
           ${canProdLog ? `<div class="addbox" id="add-mainLog">
-            <textarea class="in" id="txt-mainLog" placeholder="本厂生产进度（可写文字/传照片）…"></textarea>
+            <label class="field"><span>生产工序</span><input class="in" id="proc-mainLog" placeholder="例：车缝、锁边"></label>
+            <label class="field"><span>车工人数</span><input class="in" type="number" id="workers-mainLog" placeholder="例：12"></label>
+            <label class="field"><span>预计下车时间</span>${dateFieldHtml("est-mainLog", "")}</label>
+            <textarea class="in" id="txt-mainLog" placeholder="本厂生产进度（补充说明，选填）…" style="margin-top:8px"></textarea>
             ${photoPicker("log:mainLog")}
             <div style="margin-top:8px"><button class="btn mini" onclick="A.addLog('${o.id}','mainLog')">提交打卡</button></div></div>` : ""}
           ${logEntriesHtml(o.mainLog, o.id, "mainLog")}</div>
@@ -1186,17 +1165,16 @@ const A = {
   },
 
   toggleAdd(key) { const b = $("add-" + key); if (b) b.classList.toggle("show"); },
-  // 服装工厂选好了才展开显示生产工序/车工人数/预计下车时间，没选就先收起来
-  toggleMainFields(el) {
-    const label = el.closest("label.field");
-    const wrap = label && label.nextElementSibling;
-    if (wrap && wrap.classList.contains("mainfields-wrap")) wrap.style.display = el.value ? "contents" : "none";
-  },
   async addLog(oid, key) {
     const el = $("txt-" + key), text = ((el && el.value) || "").trim();
     const photos = photoDraft["log:" + key] || [];
-    if (!text && !photos.length) return toast("请填写打卡内容或加照片");
     const body = { key, text, photos };
+    if (key === "mainLog") {
+      const process = ($("proc-" + key) || {}).value || "", workers = ($("workers-" + key) || {}).value || "";
+      const estDone = ($("est-" + key) || {}).value || "";
+      if (!process.trim() || !workers.trim() || !estDone) return toast("请填写生产工序、车工人数、预计下车时间");
+      Object.assign(body, { process: process.trim(), workers: workers.trim(), estDone });
+    } else if (!text && !photos.length) return toast("请填写打卡内容或加照片");
     await run(() => api("POST", `/orders/${oid}/logs`, body).then(() => { delete photoDraft["log:" + key]; }), "打卡成功");
   },
   editLog(oid, key, eid) {

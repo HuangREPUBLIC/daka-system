@@ -99,6 +99,31 @@ ok(Array.isArray(presplitOut.values.fabricFactory1) && presplitOut.values.fabric
 ok(Array.isArray(presplitOut.values.embFactory) && presplitOut.values.embFactory[0] === "华艺印花厂",
   "已有订单的绣印工厂数据保留在 embFactory(现「绣花工厂」)，不受影响");
 
+// 4c) 撤回实验：已经部署过"服装工厂旁边加生产工序/车工人数/预计下车时间"这一版的库(生产服务器的真实状态)，
+//     升级后要能把这三个字段从 fields.order 里清掉，恢复成没有这三项的样子，且可重复运行(幂等)
+const withMainFields = { order: [
+  { k: "sales", label: "业务员", type: "user-sales", core: true },
+  { k: "styleNo", label: "货号", type: "text" },
+  { k: "factory", label: "服装工厂", type: "factory-prod" },
+  { k: "mainProcess", label: "生产工序", type: "text" },
+  { k: "mainWorkers", label: "车工人数", type: "number" },
+  { k: "mainEstDone", label: "预计下车时间", type: "date" }
+], production: [] };
+r = spawnSync(process.execPath, ["-e", `
+  process.env.DATA_DIR = ${JSON.stringify(DATA_DIR)};
+  const d = require(${JSON.stringify(dbPath)});
+  d.seedIfEmpty();
+  d.setSetting("fields", ${JSON.stringify(withMainFields)});
+  d.ensureDefaults();
+  d.ensureDefaults();
+  console.log(JSON.stringify(d.getSetting("fields", { order: [] }).order.map(f => f.k)));
+`], { encoding: "utf8", env: Object.assign({}, process.env, { DATA_DIR }) });
+ok(r.status === 0, "撤回「服装工厂旁边三项字段」升级两次都不报错(幂等)");
+const revertKeys = JSON.parse((r.stdout.trim().split("\n").pop() || "[]"));
+ok(!revertKeys.includes("mainProcess") && !revertKeys.includes("mainWorkers") && !revertKeys.includes("mainEstDone"),
+  "已部署的「服装工厂旁边」三项字段升级后被清除，恢复成本厂打卡时才填");
+ok(revertKeys.includes("factory"), "服装工厂字段本身还在");
+
 // 5) 老结构的订单（subs 是固定4条、无 id；inspections 用 date+items 无 id）
 //    要能安全迁移到新的"生产进度(mainLog+动态加工点)"/"验货问题(id化)"结构，且可重复运行
 const legacyOrder = {

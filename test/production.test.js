@@ -25,30 +25,13 @@ async function call(m, p, t, b) {
   ok(Array.isArray(o1.subs) && o1.subs.length === 1 && o1.subs[0].name.includes("加工点1"), "种子数据: 动态加工点已生成");
   ok(o1.inspections[0].items[0].fix && o1.inspections[0].items[0].fixBy, "种子数据: 验货记录已含 problem+fix");
 
-  // ---- 主厂打卡(mainLog)：生产工序/车工人数/预计下车时间已挪到订单的服装工厂旁边，打卡不再要求这三项 ----
-  const mainLogBody = { key: "mainLog", text: "主厂新打卡" };
-  ok((await call("POST", `/orders/${o1.id}/logs`, fT, { key: "mainLog", text: "" })).status === 400, "主厂打卡文字和照片都为空仍报错");
-  ok((await call("POST", `/orders/${o1.id}/logs`, fT, mainLogBody)).status === 200, "本单下厂员在主厂(mainLog)打卡，不用填工序/人数/预计下车时间");
+  // ---- 主厂打卡(mainLog)：生产工序/车工人数/预计下车时间是必填项(每次打卡都要填，因为随时可能换工序) ----
+  const mainLogBody = { key: "mainLog", text: "主厂新打卡", process: "车缝", workers: "12", estDone: "2026-08-01" };
+  ok((await call("POST", `/orders/${o1.id}/logs`, fT, { key: "mainLog", text: "缺必填项" })).status === 400, "主厂打卡不填生产工序/车工人数/预计下车时间报错");
+  ok((await call("POST", `/orders/${o1.id}/logs`, fT, mainLogBody)).status === 200, "本单下厂员在主厂(mainLog)打卡(含必填项)");
   ok((await call("POST", `/orders/${o1.id}/logs`, sT, Object.assign({}, mainLogBody, { text: "业务员帮着记录" }))).status === 200, "本单业务员也能在主厂(mainLog)打卡");
   ok((await call("POST", `/orders/${o1.id}/logs`, s2T, mainLogBody)).status === 200, "权限统一后，非本单业务员也能在主厂打卡");
   ok((await call("POST", `/orders/${o1.id}/logs`, f2T, mainLogBody)).status === 200, "权限统一后，非本单下厂员也能在主厂打卡");
-
-  // ---- 服装工厂：填了值就必须一并填生产工序/车工人数/预计下车时间 ----
-  ok(boot.fields.order.some(f => f.k === "mainProcess" && f.type === "text")
-    && boot.fields.order.some(f => f.k === "mainWorkers" && f.type === "number")
-    && boot.fields.order.some(f => f.k === "mainEstDone" && f.type === "date"), "订单字段含生产工序/车工人数/预计下车时间(挂在服装工厂旁边)");
-  ok((await call("POST", "/orders", sT, { season: "SS2027", values: { styleNo: "MAIN-1", factory: "宏发制衣厂" } })).status === 400,
-    "新建订单只填服装工厂、不填工序/人数/预计下车时间会报错");
-  const okNew = await call("POST", "/orders", sT, { season: "SS2027",
-    values: { styleNo: "MAIN-2", factory: "宏发制衣厂", mainProcess: "车缝", mainWorkers: "10", mainEstDone: "2026-08-06" } });
-  ok(okNew.status === 200 && okNew.j.values.mainProcess === "车缝", "新建订单同时填服装工厂和工序/人数/预计下车时间能成功");
-  ok((await call("PATCH", `/orders/${okNew.j.id}`, sT, { values: { factory: "换一个新工厂" } })).status === 400,
-    "编辑订单把服装工厂改成新值、不带工序/人数/预计下车时间会报错");
-  const patchedFactory = await call("PATCH", `/orders/${okNew.j.id}`, sT,
-    { values: { factory: "换一个新工厂", mainProcess: "锁边", mainWorkers: "7", mainEstDone: "2026-08-07" } });
-  ok(patchedFactory.status === 200 && patchedFactory.j.values.mainProcess === "锁边", "编辑订单同时改服装工厂和工序/人数/预计下车时间能成功");
-  ok((await call("PATCH", `/orders/${okNew.j.id}`, sT, { values: { styleName: "改个款式名" } })).status === 200,
-    "服装工厂没变时，编辑其它字段不受这个校验影响");
 
   // ---- 加工点：任意登录用户都能加/编辑，只有管理员能删 ----
   // 工序/人数/预计下车时间现在挪到"添加加工点"时一次性填好，POST/PATCH 都要带上这三项

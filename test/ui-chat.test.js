@@ -209,13 +209,6 @@ async function apiAs(phone, method, p, body) {
   ok(doc.getElementById("nf-deadline--label").textContent === todayCn, "新建订单日期默认当天且显示中文");
   ok(doc.getElementById("nf-deadline").value === todayIso, "底层日期值就是本地当天（不受 UTC 时差影响）");
   ok(doc.getElementById("nf-shipDate--label").textContent === todayCn, "发货日期同样默认当天");
-  // 服装工厂：选完才展开生产工序/车工人数/预计下车时间，没选先收起来
-  const factorySelNew = doc.getElementById("nf-factory");
-  const wrapNew = factorySelNew.closest("label.field").nextElementSibling;
-  ok(wrapNew.classList.contains("mainfields-wrap") && wrapNew.style.display === "none", "新建订单时没选服装工厂，生产工序等三项先收起来");
-  factorySelNew.value = [...factorySelNew.options].find(o => o.value).value;
-  factorySelNew.dispatchEvent(new window.Event("change"));
-  ok(wrapNew.style.display === "contents", "新建订单选好服装工厂后，生产工序等三项展开显示");
   ok(!!doc.getElementById("pe-img") && app().includes("拍照") && app().includes("相册"), "款式图是多图相册选择器，且拍照/相册是两个独立入口(不受 multiple 属性影响拍照选项)");
   ok(doc.querySelector("#imp-file--name") && doc.querySelector("#imp-file--name").textContent.includes("未选择文件"), "CSV 文件控件仍显示中文");
   ok(!/Choose File|No file chosen/i.test(app()), "没有英文文件选择文案");
@@ -249,15 +242,21 @@ async function apiAs(phone, method, p, body) {
   ok(app().includes("生产进度") && !app().includes("加工厂明细"), "「加工厂明细」已改名「生产进度」");
   ok(app().includes(">本厂<") && app().includes(o1.values.factory), "服装工厂名称自动带入「本厂」打卡区");
   ok(app().includes(`<span class="tag hl">${o1.values.factory}</span>`), "服装工厂名称用高亮样式(.tag.hl)展示");
-  // 生产工序/车工人数/预计下车时间不单独列成带"—"的独立行(row-label)，跟服装工厂绑在一起显示
-  ok(!app().includes('<div class="row-label">生产工序</div>'), "生产工序不再单独列成一行");
-  await apiAs("13800000000", "PATCH", `/orders/${o1.id}`,
-    { values: { factory: o1.values.factory, mainProcess: "车缝", mainWorkers: "9", mainEstDone: "2026-08-12" } });
-  await window.eval("refresh()"); window.go("detail", o1.id); await sleep(300);
-  ok(!app().includes('<div class="row-label">生产工序</div>') && app().includes("生产工序：车缝") && app().includes("车工人数：9"),
-    "生产工序/车工人数/预计下车时间跟服装工厂合并展示成一行，不是独立字段");
-  const mainFieldsText = "生产工序：车缝 · 车工人数：9 · 预计下车：2026年8月12日";
-  ok(app().split(mainFieldsText).length - 1 === 2, "生产工序等信息在「服装工厂」和「本厂」两处都展示");
+  // 本厂打卡：生产工序/车工人数/预计下车时间是必填项，且打卡记录里会展示
+  ok(!!doc.getElementById("proc-mainLog") && !!doc.getElementById("workers-mainLog") && !!doc.getElementById("est-mainLog"),
+    "本厂打卡框里有生产工序/车工人数/预计下车时间三个必填项");
+  A.toggleAdd("mainLog"); await sleep(100);
+  doc.getElementById("txt-mainLog").value = "本厂打卡-缺必填项";
+  await A.addLog(o1.id, "mainLog"); await sleep(300);
+  ok(!st().orders.find(x => x.id === o1.id).mainLog.some(e => e.text === "本厂打卡-缺必填项"), "本厂打卡不填工序/人数/预计下车时间不会提交成功");
+  doc.getElementById("proc-mainLog").value = "车缝";
+  doc.getElementById("workers-mainLog").value = "9";
+  doc.getElementById("est-mainLog").value = "2026-08-12";
+  doc.getElementById("txt-mainLog").value = "本厂打卡-含必填项";
+  await A.addLog(o1.id, "mainLog"); await sleep(300);
+  window.go("detail", o1.id); await sleep(300);
+  ok(app().includes("本厂打卡-含必填项") && app().includes("生产工序：车缝") && app().includes("车工人数：9"),
+    "本厂打卡填齐三项后成功，打卡记录里展示这三项");
   ok(!app().includes("验货日期"), "验货问题不再要求选日期");
   ok(app().includes("发货日期") && app().indexOf("包装进度") < app().indexOf("发货日期"), "发货日期排在包装进度后面");
 
@@ -266,10 +265,6 @@ async function apiAs(phone, method, p, body) {
   ok(!!doc.getElementById(`qd-${o1.id}-shipDate`) && doc.getElementById(`qd-${o1.id}-shipDate`).type === "date", "发货日期在详情页直接可点选(不用进编辑页)");
   A.toggleBasic(); await sleep(150);
   ok(!app().includes('id="nf-deadline"') && !app().includes('id="nf-shipDate"'), "编辑表单里不再重复出现订单交期/发货日期");
-  const factorySelEdit = doc.getElementById("nf-factory");
-  const wrapEdit = factorySelEdit.closest("label.field").nextElementSibling;
-  ok(wrapEdit.classList.contains("mainfields-wrap") && wrapEdit.style.display === "contents",
-    "编辑订单时，已有服装工厂值的订单一进编辑模式生产工序等三项就是展开状态");
   ok(!!doc.getElementById(`qd-${o1.id}-deadline`) && !!doc.getElementById(`qd-${o1.id}-shipDate`), "编辑模式下日期字段仍在详情页可直接点选");
   A.toggleBasic(); await sleep(150); // 退出编辑模式，不保存
   await A.quickSetDate(o1.id, "deadline", "2026-09-01"); await sleep(400);
