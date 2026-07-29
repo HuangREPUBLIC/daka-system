@@ -187,6 +187,16 @@ async function apiAs(phone, method, p, body) {
   const listTxt = app();
   ok(/\d{4}年\d{1,2}月\d{1,2}日/.test(listTxt), "订单列表交期是中文年月日");
   ok(!/\d{4}-\d{2}-\d{2}/.test(listTxt), "列表不再出现 2026-08-15 格式");
+  // 订单列表的"最新：..."提示，超过7天要自动消失
+  ok(listTxt.includes("最新："), "7天内有最新动态时正常显示「最新：」");
+  window.eval(`
+    state.orders.forEach(o => {
+      Object.values(o.logs || {}).forEach(list => (list||[]).forEach(e => e.t = Date.now() - 8*24*60*60*1000));
+      (o.subs || []).forEach(s => (s.log||[]).forEach(e => e.t = Date.now() - 8*24*60*60*1000));
+    });
+  `);
+  window.go("orders"); await sleep(200);
+  ok(!app().includes("最新："), "所有最新动态都超过7天后，「最新：」这行自动消失");
 
   const anyOrder = st().orders[0];
   window.go("detail", anyOrder.id); await sleep(500);

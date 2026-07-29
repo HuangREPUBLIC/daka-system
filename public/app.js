@@ -515,7 +515,8 @@ function vOrders() {
           <div class="o-title"><span class="tag season">${esc(o.season)}</span>${esc(o.values.styleNo || "")} ${esc([o.values.styleName, o.values.style].filter(Boolean).join(" "))}</div>
           <div class="o-meta"><span>业务员 ${esc(uname(o.values.sales)) || "—"}</span><span>下厂员 ${esc(uname(o.values.follower)) || "未指定"}</span>
             <span class="num">数量 ${esc(o.values.qty || "-")}</span><span>交期 ${esc(fmtDate(o.values.deadline)) || "-"}</span></div>
-          ${latest ? `<div class="o-latest">最新：${esc(latest.fieldLabel)} · ${esc(latest.text)} <span class="num">(${fmtT(latest.t)})</span></div>` : ""}
+          ${latest && (Date.now() - latest.t) <= 7 * 24 * 60 * 60 * 1000
+            ? `<div class="o-latest">最新：${esc(latest.fieldLabel)} · ${esc(latest.text)} <span class="num">(${fmtT(latest.t)})</span></div>` : ""}
         </div><span class="chev">›</span></div>`;
     }).join("") || `<div class="empty">${state.orders.length ? "没有符合条件的订单" : "还没有订单，点右上角 ＋ 新建"}</div>`}</div>
   </section>`;
