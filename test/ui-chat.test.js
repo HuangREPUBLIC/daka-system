@@ -272,37 +272,38 @@ async function apiAs(phone, method, p, body) {
   window.go("detail", o1.id); await sleep(300);
   ok(app().includes("2026年9月1日"), "页面上交期显示为新值");
 
-  // 动态加工点：新增(工序/人数/预计下车时间一次性填好) -> 编辑 -> 打卡(不再要求这三项)
-  const subCountBefore = st().orders.find(o => o.id === o1.id).subs.length;
-  A.toggleAdd("newsub-" + o1.id); await sleep(100);
-  doc.getElementById("newsub-name-" + o1.id).value = "新加工点X";
-  await A.addSub(o1.id); await sleep(200);
-  ok(st().orders.find(o => o.id === o1.id).subs.length === subCountBefore, "缺工序/人数/预计下车时间时新加工点没有被创建");
-  doc.getElementById("newsub-proc-" + o1.id).value = "车缝";
-  doc.getElementById("newsub-workers-" + o1.id).value = "8";
-  doc.getElementById("newsub-est-" + o1.id).value = "2026-08-10";
-  await A.addSub(o1.id); await sleep(400);
-  const newSub = st().orders.find(o => o.id === o1.id).subs.find(s => s.name === "新加工点X");
-  ok(!!newSub && newSub.process === "车缝" && newSub.workers === "8" && newSub.estDone === "2026-08-10",
-    "新增加工点成功，工序/人数/预计下车时间在创建时就一并带出");
-  window.go("detail", o1.id); await sleep(300);
-  ok(app().includes("新加工点X") && app().includes("生产工序：车缝") && app().includes("车工人数：8"),
-    "新加工点显示在生产进度里，卡片头部展示工序/人数/预计下车时间");
-  // 打卡这个加工点不再要求填工序/人数/预计下车时间，只要有文字或照片就行
-  const subKey = "sub:" + newSub.id;
-  A.toggleAdd(subKey); await sleep(100);
-  doc.getElementById("txt-" + subKey).value = "打卡测试-不填工序也能提交";
-  await A.addLog(o1.id, subKey); await sleep(400);
-  ok(st().orders.find(o => o.id === o1.id).subs.find(s => s.id === newSub.id).log
-    .some(e => e.text === "打卡测试-不填工序也能提交" && !e.process), "加工点打卡不再要求工序/人数/预计下车时间");
-  // 编辑加工点：改名字和工序
-  window.go("detail", o1.id); await sleep(300);
-  A.editSubPrompt(o1.id, newSub.id); await sleep(100);
-  doc.getElementById("editsub-name").value = "新加工点X改名后";
-  doc.getElementById("editsub-proc").value = "锁边";
+  // 动态加工点：新增(只填名字) -> 改名 -> 打卡(要求填工序/人数/预计下车时间，跟本厂一致)
+  await A.addSubPrompt(o1.id); await sleep(100);
+  doc.getElementById("m-input").value = "新加工点X";
   await A.modalOk(); await sleep(400);
-  const editedSub = st().orders.find(o => o.id === o1.id).subs.find(s => s.id === newSub.id);
-  ok(editedSub.name === "新加工点X改名后" && editedSub.process === "锁边", "编辑加工点能同时改名字和工序等字段");
+  const newSub = st().orders.find(o => o.id === o1.id).subs.find(s => s.name === "新加工点X");
+  ok(!!newSub, "新增加工点成功，名字是自己填的，不用先填工序/人数/预计下车时间");
+  window.go("detail", o1.id); await sleep(300);
+  ok(app().includes("加工点") && app().includes(`<span class="tag hl">新加工点X</span>`),
+    "新加工点显示在生产进度里，标题是「加工点」+高光标签展示名字(跟本厂同样式)");
+  // 打卡这个加工点要求填工序/人数/预计下车时间，跟本厂一致
+  const subKey = "sub:" + newSub.id;
+  ok(!!doc.getElementById("proc-" + subKey) && !!doc.getElementById("workers-" + subKey) && !!doc.getElementById("est-" + subKey),
+    "加工点打卡框里有生产工序/车工人数/预计下车时间三个必填项");
+  A.toggleAdd(subKey); await sleep(100);
+  doc.getElementById("txt-" + subKey).value = "打卡测试-缺必填项";
+  await A.addLog(o1.id, subKey); await sleep(300);
+  ok(!st().orders.find(o => o.id === o1.id).subs.find(s => s.id === newSub.id).log.some(e => e.text === "打卡测试-缺必填项"),
+    "加工点打卡不填工序/人数/预计下车时间不会提交成功");
+  doc.getElementById("proc-" + subKey).value = "车缝";
+  doc.getElementById("workers-" + subKey).value = "8";
+  doc.getElementById("est-" + subKey).value = "2026-08-10";
+  doc.getElementById("txt-" + subKey).value = "打卡测试-含必填项";
+  await A.addLog(o1.id, subKey); await sleep(400);
+  window.go("detail", o1.id); await sleep(300);
+  ok(app().includes("打卡测试-含必填项") && app().includes("生产工序：车缝") && app().includes("车工人数：8"),
+    "加工点打卡填齐三项后成功，打卡记录里展示这三项");
+  // 改名：只改名字
+  A.renameSub(o1.id, newSub.id); await sleep(100);
+  doc.getElementById("m-input").value = "新加工点X改名后";
+  await A.modalOk(); await sleep(400);
+  const renamedSub = st().orders.find(o => o.id === o1.id).subs.find(s => s.id === newSub.id);
+  ok(renamedSub.name === "新加工点X改名后", "改名只改名字");
 
   // 验货：业务员创建「发现问题」，本单下厂员填「整改情况」，双方都不能越权
   window.go("detail", o1.id); await sleep(300);

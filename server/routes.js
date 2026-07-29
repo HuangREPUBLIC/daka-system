@@ -341,10 +341,8 @@ router.post("/orders/:id/logs", (req, res) => {
   const t = String(text || "").trim();
   const photos = cleanPhotos((req.body || {}).photos);
   const entry = { id: uid(), by: req.user.id, byName: req.user.name, t: Date.now(), text: t, photos };
-  // 本厂(mainLog)打卡：生产工序/车工人数/预计下车时间是必填项(每次打卡都要填，因为随时可能换工序)。
-  // 加工点(sub:*)不一样——那三项在"添加加工点"时一次性填好了(见 POST/PATCH /orders/:id/subs)，
-  // 打卡在加工点这边只是单纯的文字/照片进度记录，跟其它进度字段(面料进度/裁剪进度等)一样。
-  if (key === "mainLog") {
+  // 主厂/加工点打卡：生产工序/车工人数/预计下车时间是必填项，其它进度字段(面料进度/裁剪进度等)仍是纯文字打卡
+  if (key === "mainLog" || String(key).startsWith("sub:")) {
     const proc = String(process || "").trim(), wk = String(workers || "").trim(), est = String(estDone || "").trim();
     if (!proc || !wk || !est) return res.status(400).json({ error: "请填写生产工序、车工人数、预计下车时间" });
     Object.assign(entry, { process: proc, workers: wk, estDone: est });
@@ -379,25 +377,15 @@ router.delete("/orders/:id/logs/:key/:entryId", (req, res) => {
   res.json(orderPublic(loadOrder(o.id)));
 });
 
-// 加工点：下厂员自己决定要不要加、加几个、叫什么名字，不用管理员预先配置下拉。
-// 生产工序/车工人数/预计下车时间在这里一次性填好，之后打卡不再重复要求；中途要改这三项走下面的 PATCH。
-function readSubFields(body) {
-  return {
-    name: String((body || {}).name || "").trim(),
-    process: String((body || {}).process || "").trim(),
-    workers: String((body || {}).workers || "").trim(),
-    estDone: String((body || {}).estDone || "").trim()
-  };
-}
+// 加工点：下厂员自己决定要不要加、加几个、叫什么名字，不用管理员预先配置下拉
 router.post("/orders/:id/subs", (req, res) => {
   const o = loadOrder(req.params.id);
   if (!o) return res.status(404).json({ error: "订单不存在" });
   if (!A.canAddLog(req.user, o, "production")) return res.status(403).json({ error: "无权添加加工点" });
-  const f = readSubFields(req.body);
-  if (!f.name) return res.status(400).json({ error: "请填写加工点名称" });
-  if (!f.process || !f.workers || !f.estDone) return res.status(400).json({ error: "请填写生产工序、车工人数、预计下车时间" });
+  const name = String((req.body || {}).name || "").trim();
+  if (!name) return res.status(400).json({ error: "请填写加工点名称" });
   o.data.subs = o.data.subs || [];
-  o.data.subs.push({ id: uid(), name: f.name, process: f.process, workers: f.workers, estDone: f.estDone, log: [] });
+  o.data.subs.push({ id: uid(), name, log: [] });
   saveOrder(o);
   res.json(orderPublic(loadOrder(o.id)));
 });
@@ -408,11 +396,9 @@ router.patch("/orders/:id/subs/:subId", (req, res) => {
   if (!A.canAddLog(req.user, o, "production")) return res.status(403).json({ error: "无权修改" });
   const sub = (o.data.subs || []).find(x => x.id === req.params.subId);
   if (!sub) return res.status(404).json({ error: "加工点不存在" });
-  const f = readSubFields(req.body);
-  if (!f.name) return res.status(400).json({ error: "名称不能为空" });
-  if (!f.process || !f.workers || !f.estDone) return res.status(400).json({ error: "请填写生产工序、车工人数、预计下车时间" });
-  sub.name = f.name; sub.process = f.process; sub.workers = f.workers; sub.estDone = f.estDone;
-  saveOrder(o);
+  const name = String((req.body || {}).name || "").trim();
+  if (!name) return res.status(400).json({ error: "名称不能为空" });
+  sub.name = name; saveOrder(o);
   res.json(orderPublic(loadOrder(o.id)));
 });
 
@@ -762,10 +748,8 @@ router.get("/export", A.adminRequired, (req, res) => {
   const rows2 = [];
   orders.forEach(o => {
     (o.mainLog || []).forEach(e => rows2.push([o.season, styleOf(o), "主厂", e.process || "", e.workers || "", e.estDone || "", e.text || "", e.byName, timeText(e.t), photosText(e.photos)]));
-    // 加工点的工序/人数/预计下车时间现在挂在加工点本身(创建/编辑时填)，优先用它；
-    // 老数据里加工点没有这三项时，退回旧的按条打卡记录里的值，导出报表不会突然空白
     (o.subs || []).forEach(s => (s.log || []).forEach(e =>
-      rows2.push([o.season, styleOf(o), s.name, s.process || e.process || "", s.workers || e.workers || "", s.estDone || e.estDone || "", e.text || "", e.byName, timeText(e.t), photosText(e.photos)])));
+      rows2.push([o.season, styleOf(o), s.name, e.process || "", e.workers || "", e.estDone || "", e.text || "", e.byName, timeText(e.t), photosText(e.photos)])));
     [...fields.order, ...fields.production].filter(f => f.type === "log").forEach(f =>
       (o.logs[f.k] || []).forEach(e => rows2.push([o.season, styleOf(o), f.label, "", "", "", e.text || "", e.byName, timeText(e.t), photosText(e.photos)])));
   });

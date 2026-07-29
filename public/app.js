@@ -558,18 +558,28 @@ function importPreviewHtml() {
 }
 
 /* ---------- 订单详情 ---------- */
-// 一条打卡记录的展示（改/删链接 + 文字 + 照片），主厂/加工点/普通进度字段共用。
-// 生产工序/车工人数/预计下车时间不在打卡记录里展示了，挪到服装工厂/加工点各自的信息区显示一次。
+// 一条打卡记录的展示（改/删链接 + 文字 + 照片），主厂/加工点/普通进度字段共用
 function logEntriesHtml(list, oid, key) {
   const entries = (list || []).slice().sort((a, b) => b.t - a.t);
   if (!entries.length) return `<div class="empty" style="padding:8px 0">暂无打卡记录</div>`;
+  const isMainSub = key === "mainLog" || key.startsWith("sub:");
   return `<ul class="log">${entries.map(e => `<li>
     <div class="meta"><b>${esc(e.byName)}</b><span class="num">${fmtT(e.t)}</span>
       ${canTouchEntry(e) ? `<span class="act-row"><button type="button" class="act-btn" onclick="A.editLog('${oid}','${key}','${e.id}')">改</button>
       <button type="button" class="act-btn danger" onclick="A.delLog('${oid}','${key}','${e.id}')">删</button></span>` : ""}</div>
-    ${key === "mainLog" && e.process ? `<div style="font-size:13px;color:var(--ink-2);margin-top:2px">
+    ${isMainSub && e.process ? `<div style="font-size:13px;color:var(--ink-2);margin-top:2px">
       生产工序：${esc(e.process)} · 车工人数：${esc(e.workers)} · 预计下车：${esc(fmtDate(e.estDone))}</div>` : ""}
     ${e.text ? `<div class="txt">${esc(e.text)}</div>` : ""}${photoGallery(e.photos)}</li>`).join("")}</ul>`;
+}
+// 主厂/加工点打卡：生产工序/车工人数/预计下车时间是必填项（其它进度字段仍是纯文字打卡）
+function mainSubAddBoxHtml(oid, key, placeholder) {
+  return `<div class="addbox" id="add-${key}">
+    <label class="field"><span>生产工序</span><input class="in" id="proc-${key}" placeholder="例：车缝、锁边"></label>
+    <label class="field"><span>车工人数</span><input class="in" type="number" id="workers-${key}" placeholder="例：12"></label>
+    <label class="field"><span>预计下车时间</span>${dateFieldHtml("est-" + key, "")}</label>
+    <textarea class="in" id="txt-${key}" placeholder="${esc(placeholder)}" style="margin-top:8px"></textarea>
+    ${photoPicker("log:" + key)}
+    <div style="margin-top:8px"><button class="btn mini" onclick="A.addLog('${oid}','${key}')">提交打卡</button></div></div>`;
 }
 function logFieldHtml(o, f, list, addKey, canAdd) {
   return `<div class="logfield">
@@ -586,17 +596,12 @@ function subCardHtml(o, s, canProdLog) {
   const key = "sub:" + s.id;
   return `<div style="margin-top:10px;border-top:.5px solid var(--line);padding-top:10px">
     <div class="lf-head" style="font-size:14.5px">
-      <span>${esc(s.name)}</span>
-      ${canProdLog ? `<button type="button" class="act-btn" onclick="A.editSubPrompt('${o.id}','${s.id}')">编辑</button>` : ""}
+      <span>加工点</span> <span class="tag hl">${esc(s.name)}</span>
+      ${canProdLog ? `<button type="button" class="act-btn" onclick="A.renameSub('${o.id}','${s.id}')">改名</button>` : ""}
       ${isAdmin() ? `<button type="button" class="act-btn danger" onclick="A.delSub('${o.id}','${s.id}')">删除</button>` : ""}
       ${canProdLog ? `<button class="btn mini right" onclick="A.toggleAdd('${key}')">＋ 打卡</button>` : ""}
     </div>
-    ${s.process ? `<div style="font-size:13px;color:var(--ink-2);margin-top:2px">
-      生产工序：${esc(s.process)} · 车工人数：${esc(s.workers)} · 预计下车：${esc(fmtDate(s.estDone))}</div>` : ""}
-    ${canProdLog ? `<div class="addbox" id="add-${key}">
-      <textarea class="in" id="txt-${key}" placeholder="该加工点的进度情况（可写文字/传照片）…"></textarea>
-      ${photoPicker("log:" + key)}
-      <div style="margin-top:8px"><button class="btn mini" onclick="A.addLog('${o.id}','${key}')">提交打卡</button></div></div>` : ""}
+    ${canProdLog ? mainSubAddBoxHtml(o.id, key, "该加工点的进度情况（补充说明，选填）…") : ""}
     ${logEntriesHtml(s.log, o.id, key)}</div>`;
 }
 // 验货：一条"发现问题/整改情况"的展示（两个字段各自独立可编辑）
@@ -677,24 +682,11 @@ function vDetail() {
           <div class="lf-head" style="font-size:14.5px"><span>本厂</span>
             <span class="tag hl">${esc(o.values.factory) || "未指定"}</span>
             ${canProdLog ? `<button class="btn mini right" onclick="A.toggleAdd('mainLog')">＋ 打卡</button>` : ""}</div>
-          ${canProdLog ? `<div class="addbox" id="add-mainLog">
-            <label class="field"><span>生产工序</span><input class="in" id="proc-mainLog" placeholder="例：车缝、锁边"></label>
-            <label class="field"><span>车工人数</span><input class="in" type="number" id="workers-mainLog" placeholder="例：12"></label>
-            <label class="field"><span>预计下车时间</span>${dateFieldHtml("est-mainLog", "")}</label>
-            <textarea class="in" id="txt-mainLog" placeholder="本厂生产进度（补充说明，选填）…" style="margin-top:8px"></textarea>
-            ${photoPicker("log:mainLog")}
-            <div style="margin-top:8px"><button class="btn mini" onclick="A.addLog('${o.id}','mainLog')">提交打卡</button></div></div>` : ""}
+          ${canProdLog ? mainSubAddBoxHtml(o.id, "mainLog", "本厂生产进度（补充说明，选填）…") : ""}
           ${logEntriesHtml(o.mainLog, o.id, "mainLog")}</div>
         ${(o.subs || []).map(s => subCardHtml(o, s, canProdLog)).join("")}
         ${canProdLog ? `<div style="margin-top:10px;border-top:.5px solid var(--line);padding-top:10px">
-          <button class="btn mini ghost" onclick="A.toggleAdd('newsub-${o.id}')">＋ 添加加工点</button>
-          <div class="addbox" id="add-newsub-${o.id}">
-            <label class="field"><span>加工点名称</span><input class="in" id="newsub-name-${o.id}" placeholder="例：绣花外发点、二次印花点"></label>
-            <label class="field"><span>生产工序</span><input class="in" id="newsub-proc-${o.id}" placeholder="例：车缝、锁边"></label>
-            <label class="field"><span>车工人数</span><input class="in" type="number" id="newsub-workers-${o.id}" placeholder="例：12"></label>
-            <label class="field"><span>预计下车时间</span>${dateFieldHtml("newsub-est-" + o.id, "")}</label>
-            <div style="margin-top:8px"><button class="btn mini" onclick="A.addSub('${o.id}')">添加</button></div>
-          </div></div>` : ""}
+          <button class="btn mini ghost" onclick="A.addSubPrompt('${o.id}')">＋ 添加加工点</button></div>` : ""}
       </div>
       ${logsOf("production").filter(f => !["preSample", "cutting"].includes(f.k)).map(f => logFieldHtml(o, f, o.logs[f.k] || [], f.k, canProdLog)).join("")}
     </div>
@@ -1169,7 +1161,8 @@ const A = {
     const el = $("txt-" + key), text = ((el && el.value) || "").trim();
     const photos = photoDraft["log:" + key] || [];
     const body = { key, text, photos };
-    if (key === "mainLog") {
+    const isMainSub = key === "mainLog" || key.startsWith("sub:");
+    if (isMainSub) {
       const process = ($("proc-" + key) || {}).value || "", workers = ($("workers-" + key) || {}).value || "";
       const estDone = ($("est-" + key) || {}).value || "";
       if (!process.trim() || !workers.trim() || !estDone) return toast("请填写生产工序、车工人数、预计下车时间");
@@ -1192,37 +1185,16 @@ const A = {
   },
 
   /* ---- 生产进度：动态加工点 ---- */
-  async addSub(oid) {
-    const name = ($("newsub-name-" + oid) || {}).value || "";
-    const process = ($("newsub-proc-" + oid) || {}).value || "";
-    const workers = ($("newsub-workers-" + oid) || {}).value || "";
-    const estDone = ($("newsub-est-" + oid) || {}).value || "";
-    if (!name.trim()) return toast("请填写加工点名称");
-    if (!process.trim() || !workers.trim() || !estDone) return toast("请填写生产工序、车工人数、预计下车时间");
-    await run(() => api("POST", `/orders/${oid}/subs`, { name: name.trim(), process: process.trim(), workers: workers.trim(), estDone }),
-      "已添加加工点：" + name.trim());
+  addSubPrompt(oid) {
+    modal({ title: "添加加工点", body: "给这个加工点起个名字，比如「绣花外发点」「二次印花点」。", input: "text", okText: "添加",
+      onOk: v => { const name = (v || "").trim(); if (name) run(() => api("POST", `/orders/${oid}/subs`, { name }), "已添加加工点：" + name); } });
   },
-  editSubPrompt(oid, subId) {
+  renameSub(oid, subId) {
     const o = state.orders.find(x => x.id === oid);
     const sub = o && o.subs.find(x => x.id === subId);
     if (!sub) return;
-    modal({ title: "编辑加工点", keepOpenOnOk: true, html: `
-      <label class="field"><span>加工点名称</span><input class="in" id="editsub-name" value="${esc(sub.name)}"></label>
-      <label class="field"><span>生产工序</span><input class="in" id="editsub-proc" value="${esc(sub.process || "")}"></label>
-      <label class="field"><span>车工人数</span><input class="in" type="number" id="editsub-workers" value="${esc(sub.workers || "")}"></label>
-      <label class="field"><span>预计下车时间</span>${dateFieldHtml("editsub-est", sub.estDone || "")}</label>`,
-      okText: "保存",
-      onOk: async () => {
-        const name = ($("editsub-name") || {}).value || "";
-        const process = ($("editsub-proc") || {}).value || "";
-        const workers = ($("editsub-workers") || {}).value || "";
-        const estDone = ($("editsub-est") || {}).value || "";
-        if (!name.trim()) return toast("请填写加工点名称");
-        if (!process.trim() || !workers.trim() || !estDone) return toast("请填写生产工序、车工人数、预计下车时间");
-        await run(() => api("PATCH", `/orders/${oid}/subs/${subId}`,
-          { name: name.trim(), process: process.trim(), workers: workers.trim(), estDone }), "已修改");
-        A.modalCancel();
-      } });
+    modal({ title: "修改加工点名称", input: "text", value: sub.name, okText: "保存",
+      onOk: v => { const name = (v || "").trim(); if (name) run(() => api("PATCH", `/orders/${oid}/subs/${subId}`, { name }), "已修改"); } });
   },
   delSub(oid, subId) {
     modal({ title: "删除这个加工点？", body: "删除后该加工点下的打卡记录一并删除，且不可恢复。", danger: true, okText: "确认删除",

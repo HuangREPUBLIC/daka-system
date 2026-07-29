@@ -33,25 +33,16 @@ async function call(m, p, t, b) {
   ok((await call("POST", `/orders/${o1.id}/logs`, s2T, mainLogBody)).status === 200, "权限统一后，非本单业务员也能在主厂打卡");
   ok((await call("POST", `/orders/${o1.id}/logs`, f2T, mainLogBody)).status === 200, "权限统一后，非本单下厂员也能在主厂打卡");
 
-  // ---- 加工点：任意登录用户都能加/编辑，只有管理员能删 ----
-  // 工序/人数/预计下车时间现在挪到"添加加工点"时一次性填好，POST/PATCH 都要带上这三项
-  const subFields = { process: "车缝", workers: "6", estDone: "2026-08-05" };
-  const addSub = await call("POST", `/orders/${o1.id}/subs`, fT, Object.assign({ name: "加工点2（临时外发）" }, subFields));
-  ok(addSub.status === 200 && addSub.j.subs.length === 2, "下厂员新增加工点，无需管理员预配置");
-  ok(addSub.j.subs[1].process === "车缝" && addSub.j.subs[1].workers === "6" && addSub.j.subs[1].estDone === "2026-08-05",
-    "新增加工点时工序/人数/预计下车时间一并带出并保存");
-  ok((await call("POST", `/orders/${o1.id}/subs`, fT, { name: "缺必填项的加工点" })).status === 400, "添加加工点不填工序/人数/预计下车时间报错");
-  ok((await call("POST", `/orders/${o1.id}/subs`, sT, Object.assign({ name: "业务员加的加工点" }, subFields))).status === 200, "本单业务员也能加加工点");
-  ok((await call("POST", `/orders/${o1.id}/subs`, s2T, Object.assign({ name: "非本单业务员也能加" }, subFields))).status === 200, "权限统一后，非本单业务员也能加加工点");
-  ok((await call("POST", `/orders/${o1.id}/subs`, f2T, Object.assign({ name: "非本单下厂员也能加" }, subFields))).status === 200, "权限统一后，非本单下厂员也能加加工点");
+  // ---- 加工点：任意登录用户都能加/改名，只有管理员能删 ----
+  const addSub = await call("POST", `/orders/${o1.id}/subs`, fT, { name: "加工点2（临时外发）" });
+  ok(addSub.status === 200 && addSub.j.subs.length === 2, "下厂员新增加工点，无需管理员预配置，不用先填工序/人数/预计下车时间");
+  ok((await call("POST", `/orders/${o1.id}/subs`, sT, { name: "业务员加的加工点" })).status === 200, "本单业务员也能加加工点");
+  ok((await call("POST", `/orders/${o1.id}/subs`, s2T, { name: "非本单业务员也能加" })).status === 200, "权限统一后，非本单业务员也能加加工点");
+  ok((await call("POST", `/orders/${o1.id}/subs`, f2T, { name: "非本单下厂员也能加" })).status === 200, "权限统一后，非本单下厂员也能加加工点");
   const subId = addSub.j.subs[1].id;
-  ok((await call("PATCH", `/orders/${o1.id}/subs/${subId}`, fT, Object.assign({ name: "改名后的加工点" }, subFields))).status === 200, "下厂员编辑加工点(改名+工序等)");
-  const patched = (await call("GET", `/orders/${o1.id}`, aT)).j;
-  ok(patched.subs.find(s => s.id === subId).name === "改名后的加工点", "编辑后名称已更新");
-  ok((await call("PATCH", `/orders/${o1.id}/subs/${subId}`, fT, { name: "只改名字" })).status === 400, "编辑加工点不填工序/人数/预计下车时间报错");
-  ok((await call("POST", `/orders/${o1.id}/logs`, fT, { key: "sub:" + subId, text: "在动态加工点打卡" })).status === 200,
-    "加工点打卡不再要求工序/人数/预计下车时间，有文字就行");
-  ok((await call("POST", `/orders/${o1.id}/logs`, fT, { key: "sub:" + subId, text: "" })).status === 400, "加工点打卡文字和照片都为空仍报错");
+  ok((await call("PATCH", `/orders/${o1.id}/subs/${subId}`, fT, { name: "改名后的加工点" })).status === 200, "下厂员改加工点名称");
+  ok((await call("POST", `/orders/${o1.id}/logs`, fT, { key: "sub:" + subId, text: "在动态加工点打卡", process: "锁边", workers: "5", estDone: "2026-08-02" })).status === 200, "在新加的加工点打卡(含必填项)");
+  ok((await call("POST", `/orders/${o1.id}/logs`, fT, { key: "sub:" + subId, text: "缺必填项" })).status === 400, "加工点打卡不填必填项报错");
   ok((await call("DELETE", `/orders/${o1.id}/subs/${subId}`, fT)).status === 403, "非管理员不能删加工点(删除仍限管理员)");
   ok((await call("DELETE", `/orders/${o1.id}/subs/${subId}`, aT)).status === 200, "管理员可以删加工点");
 
