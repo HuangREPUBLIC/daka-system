@@ -9,7 +9,7 @@
   --ease-out:cubic-bezier(0.23,1,0.32,1);
   --ease-drawer:cubic-bezier(0.32,0.72,0,1);
   /* 品牌色：韩航蓝 */
-  --blue:#123B6D; --blue-2:#1E5FA8; --sky:#7AB2DD; --sky-soft:#E9F3FB;
+  --blue:#123B6D; --blue-2:#1E5FA8; --sky:#7AB2DD; --sky-soft:#E9F3FB; --magenta:#AD1457;
   /* iOS 系统灰阶 */
   --bg:#F2F2F7; --card:#FFFFFF; --card-2:#FFFFFF;
   --ink:#000000; --ink-2:#8A8A8E; --ink-3:#C7C7CC;
@@ -22,7 +22,7 @@
 }
 @media (prefers-color-scheme: dark){
   :root{
-    --blue:#5B9BD8; --blue-2:#6EA8DF; --sky:#7AB2DD; --sky-soft:#16283D;
+    --blue:#5B9BD8; --blue-2:#6EA8DF; --sky:#7AB2DD; --sky-soft:#16283D; --magenta:#EC407A;
     --bg:#000000; --card:#1C1C1E; --card-2:#2C2C2E;
     --ink:#FFFFFF; --ink-2:#8E8E93; --ink-3:#48484A;
     --line:#38383A; --line-2:#48484A;
@@ -32,7 +32,7 @@
   }
 }
 :root[data-theme="light"]{
-  --blue:#123B6D; --blue-2:#1E5FA8; --sky:#7AB2DD; --sky-soft:#E9F3FB;
+  --blue:#123B6D; --blue-2:#1E5FA8; --sky:#7AB2DD; --sky-soft:#E9F3FB; --magenta:#AD1457;
   --bg:#F2F2F7; --card:#FFFFFF; --card-2:#FFFFFF;
   --ink:#000000; --ink-2:#8A8A8E; --ink-3:#C7C7CC;
   --line:#E5E5EA; --line-2:#D1D1D6;
@@ -154,8 +154,8 @@ textarea.in{min-height:92px;resize:vertical;line-height:1.45}
 .tag.ok{background:var(--ok-soft);color:var(--ok)}
 .tag.off{background:var(--bad-soft);color:var(--bad)}
 .tag.role{background:var(--bg);color:var(--ink-2);box-shadow:inset 0 0 0 .5px var(--line-2)}
-.tag.season{background:var(--blue-2);color:#fff;font-weight:700;padding:3px 10px}
-.tag.hl{background:var(--blue-2);color:#fff;font-weight:700;padding:3px 10px}
+.tag.season{background:var(--magenta);color:#fff;font-weight:700;padding:3px 10px}
+.tag.hl{background:var(--blue-2);color:#fff;font-weight:700;padding:5px 12px;font-size:15px}
 .badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;
   border-radius:99px;background:var(--bad);color:#fff;font-size:11px;font-weight:600;line-height:1}
 
@@ -414,10 +414,10 @@ table.tbl{border-collapse:collapse;width:100%;font-size:15px;min-width:460px}
 /* ---- 大类标题高亮（订单明细/生产明细/验货问题/跟单小结） ---- */
 .cat-title{
   display:inline-flex;align-items:center;
-  background:var(--blue-2);color:#fff;
+  background:var(--magenta);color:#fff;
   font-weight:700;font-size:14.5px;
   padding:5px 14px;border-radius:99px;
-  box-shadow:0 3px 10px color-mix(in srgb,var(--blue-2) 50%,transparent);
+  box-shadow:0 3px 10px color-mix(in srgb,var(--magenta) 50%,transparent);
 }
 
 /* ---- 详情页头部款式图缩略 ---- */
