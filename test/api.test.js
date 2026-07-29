@@ -108,6 +108,9 @@ async function call(method, path, token, body) {
   const XLSX = require("xlsx");
   const wb = XLSX.read(buf, { type: "buffer" });
   ok(["订单基本信息", "生产进度", "验货问题", "跟单小结"].every(n => wb.SheetNames.includes(n)), "导出含四个分表：基本信息/生产进度/验货问题/跟单小结");
+  const baseHeader = XLSX.utils.sheet_to_json(wb.Sheets["订单基本信息"], { header: 1 })[0];
+  ok(baseHeader.filter(h => h === "货号").length === 1, "「订单基本信息」表头里「货号」不重复出现两次");
+  ok(baseHeader.includes("发货日期"), "「订单基本信息」表头包含发货日期字段");
   const inspSheet = XLSX.utils.sheet_to_json(wb.Sheets["验货问题"]);
   ok(inspSheet.some(r => r["发现问题"] === "首件肩缝有轻微起皱"), "验货问题表含发现问题内容");
   // 按季节筛选导出

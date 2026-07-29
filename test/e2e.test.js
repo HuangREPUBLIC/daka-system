@@ -174,6 +174,18 @@ function buildXlsxWithEmbeddedImage() {
   ok(st().orders.some(o => o.values.styleName === "导入甲改名"), "导入时用户的修改被保存");
   ok(!st().orders.some(o => o.values.styleNo === "E2E-IMP2"), "被移除的单未导入");
 
+  // 批量导入：粘贴文字时列顺序打乱了也要能按表头名字对齐，不能按位置瞎猜；发货日期也要能正确导入(不丢失)
+  window.go("new"); await sleep(200);
+  doc.getElementById("imp-text").value = "数量,季节,款式名,货号,发货日期,订单交期\n500,SS2027,乱序测试款,E2E-ORDER,2026-09-10,2026-08-20";
+  A.importText(); await sleep(250);
+  ok(doc.getElementById("imp0-styleNo").value === "E2E-ORDER", "列顺序打乱后，货号依然按表头名字对上了正确的值");
+  ok(doc.getElementById("imp0-qty").value === "500", "数量也对上了(不是被货号那一列的值覆盖)");
+  ok(doc.getElementById("imp0-shipDate") && doc.getElementById("imp0-shipDate").value === "2026-09-10", "发货日期能正确导入，不再丢失");
+  ok(doc.getElementById("imp0-deadline") && doc.getElementById("imp0-deadline").value === "2026-08-20", "订单交期也正确导入，跟发货日期没混淆");
+  await A.confirmImport(); await sleep(500);
+  const orderX = st().orders.find(o => o.values.styleNo === "E2E-ORDER");
+  ok(!!orderX && orderX.values.shipDate === "2026-09-10" && orderX.values.deadline === "2026-08-20", "确认导入后发货日期/订单交期都正确保存");
+
   // 批量导入：WPS/Excel 表格里嵌入的款式图，能自动抠出来配对到对应行
   window.go("new"); await sleep(200);
   const xlsxBuf = buildXlsxWithEmbeddedImage();

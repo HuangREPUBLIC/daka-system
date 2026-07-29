@@ -1447,7 +1447,7 @@ const A = {
   // 表头列名 -> 字段
   importMap() {
     return { "货号": "styleNo", "款式名": "styleName", "款式": "style", "数量": "qty", "款式描述": "desc",
-      "订单交期": "deadline", "交期": "deadline", "业务员": "sales", "下厂员": "follower",
+      "订单交期": "deadline", "交期": "deadline", "发货日期": "shipDate", "业务员": "sales", "下厂员": "follower",
       "季节": "_season", "订单季节": "_season",
       "服装工厂": "factory", "生产厂": "factory", // 生产厂 是旧表头，兼容老导入模板
       "面料工厂1": "fabricFactory1", "面料工厂2": "fabricFactory2", "面料工厂": "fabricFactory1", // 面料工厂 是旧表头，导入进面料工厂1

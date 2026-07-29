@@ -799,8 +799,9 @@ router.get("/export", A.adminRequired, (req, res) => {
   const photosText = arr => (arr || []).join("、");
   const timeText = t => t ? new Date(t).toLocaleString("zh-CN") : "";
 
-  // 表一：订单基本信息（与原有逻辑一致，仍是每个字段取最新一条打卡摘要）
-  const cols = [...fields.order, ...fields.production];
+  // 表一：订单基本信息（与原有逻辑一致，仍是每个字段取最新一条打卡摘要）。
+  // 货号(styleNo)已经作为固定的第二列(styleOf，带款式名/id兜底)单独放了，这里排除掉，避免表头重复出现两次"货号"
+  const cols = [...fields.order, ...fields.production].filter(f => f.k !== "styleNo");
   const header1 = ["季节", "货号", ...cols.map(f => f.label)];
   const rows1 = orders.map(o => [o.season, styleOf(o), ...cols.map(f => {
     if (f.type === "log") {
